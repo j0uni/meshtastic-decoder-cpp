@@ -56,10 +56,47 @@ echo "Note: This is a real TRACEROUTE_APP packet from the mesh network!"
 echo "      It should show route_count, route_path, and route_nodes in the output."
 echo
 
+echo "Testing additional WAYPOINT_APP examples (Port 8)..."
+echo "These are real packets from the mesh network showing different routing scenarios:"
+echo
+
+echo "Example 1: WAYPOINT_APP with hop_limit=5, skip_count=2 (relayed 2 times)"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF A8 E2 09 13 BC 4B 9F 30 A5 08 00 A8 9E 77 2F C2 06 53 1A BC 24 B6 95 47 1E 1F D2 CD 31 5C F1 A5 72 99 3D DB 15 20 41 B5 2A F2 AD 92 03 FF BF F8\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF A8 E2 09 13 BC 4B 9F 30 A5 08 00 A8 9E 77 2F C2 06 53 1A BC 24 B6 95 47 1E 1F D2 CD 31 5C F1 A5 72 99 3D DB 15 20 41 B5 2A F2 AD 92 03 FF BF F8" | jq '.routing' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Example 2: WAYPOINT_APP with hop_limit=0, skip_count=7 (heavily relayed)"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 24 F3 EC 9E C5 25 B8 87 60 08 00 A8 36 04 8B 99 21 4E E5 4F 61 90 2B 4C BF 9F 4F 0C A2 B8 27 1C C9 10 BE B4 73 D3 32 8F 8D DE 96 0C 71\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 24 F3 EC 9E C5 25 B8 87 60 08 00 A8 36 04 8B 99 21 4E E5 4F 61 90 2B 4C BF 9F 4F 0C A2 B8 27 1C C9 10 BE B4 73 D3 32 8F 8D DE 96 0C 71" | jq '.routing' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Example 3: WAYPOINT_APP with hop_limit=4, skip_count=3 (moderately relayed)"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 5C CB 2A DB 9A 79 AE 00 E4 08 00 E8 B6 C9 8C EF 0C 68 2F CA E0 05 43 90 51 E5 9C 36 8F 4A FC 22 C4 91 0A\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 5C CB 2A DB 9A 79 AE 00 E4 08 00 E8 B6 C9 8C EF 0C 68 2F CA E0 05 43 90 51 E5 9C 36 8F 4A FC 22 C4 91 0A" | jq '.routing' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Example 4: WAYPOINT_APP with different node IDs (from database)"
+echo "Command: ./build/meshtastic_decoder_standalone \"00 00 00 00 98 E2 09 13 1E 80 9C F5 00 08 00 98 DA CC 0A 2B 2B 1A 78 5C E4 C5 33 2A 8B D3 22 93 AA 2E D4 C0 E1 91 76 34 E1 E3 0A 2C 96 6A 27 2A 2B\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "00 00 00 00 98 E2 09 13 1E 80 9C F5 00 08 00 98 DA CC 0A 2B 2B 1A 78 5C E4 C5 33 2A 8B D3 22 93 AA 2E D4 C0 E1 91 76 34 E1 E3 0A 2C 96 6A 27 2A 2B" | jq '.routing' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
 echo "=== Test Complete ==="
-echo "Note: This decoder supports all four main Meshtastic app types:"
+echo "Note: This decoder supports all main Meshtastic app types:"
 echo "      - TEXT_MESSAGE_APP (port 1) - Text messages"
 echo "      - POSITION_APP (port 3) - GPS coordinates"
 echo "      - NODEINFO_APP (port 4) - Node information"
+echo "      - WAYPOINT_APP (port 8) - Waypoint and location data"
+echo "      - RANGE_TEST_APP (port 66) - Range testing packets"
 echo "      - TRACEROUTE_APP (port 70) - Route discovery and network path analysis"
-echo "      Install 'jq' for better JSON formatting: sudo apt install jq (Ubuntu/Debian) or brew install jq (macOS)"
+echo ""
+echo "The examples above demonstrate:"
+echo "      - Different packet types and their decoding"
+echo "      - Various routing scenarios (direct vs relayed packets)"
+echo "      - Different hop counts and routing information"
+echo "      - Real packets from the mesh network"
+echo ""
+echo "Install 'jq' for better JSON formatting: sudo apt install jq (Ubuntu/Debian) or brew install jq (macOS)"

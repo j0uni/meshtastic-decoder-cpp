@@ -52,6 +52,12 @@ class MeshtasticDecoderStandalone
 		std::string route_path;
 		int route_count;
 		
+		// Skip and travel information
+		uint8_t skip_count;
+		bool heard_directly;
+		uint8_t hop_limit;
+		std::string routing_info;
+		
 		
 
 		// Raw data
@@ -99,6 +105,9 @@ class MeshtasticDecoderStandalone
 	bool decodeTraceroute(const std::vector<uint8_t>& data,
 						  DecodedPacket& packet);
 	uint64_t decodeVarint(const std::vector<uint8_t>& data, size_t& offset);
+	
+	// Skip and routing calculation
+	void calculateSkipAndRouting(DecodedPacket& packet);
 };
 
 // Default PSK key (Base64: 1PG7OiApB1nwvP+rz05pAQ==)
@@ -140,6 +149,10 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 	result.route_nodes.clear();
 	result.route_path = "";
 	result.route_count = 0;
+	result.skip_count = 0;
+	result.heard_directly = false;
+	result.hop_limit = 0;
+	result.routing_info = "";
 
 	// Parse header
 	if (!parseHeader(raw_data, result))
@@ -147,6 +160,9 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 		result.error_message = "Failed to parse packet header";
 		return result;
 	}
+	
+	// Calculate skip count and routing information
+	calculateSkipAndRouting(result);
 
 	// Extract payload
 	if (raw_data.size() < 16)
@@ -182,6 +198,7 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 	}
 
 	// Extract port number and set app name
+	// The first byte is a protobuf field number, the port is in the second byte
 	result.port = decrypted_payload[1];
 	switch (result.port)
 	{
@@ -193,6 +210,9 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 			break;
 		case 4:
 			result.app_name = "NODEINFO_APP";
+			break;
+		case 8:
+			result.app_name = "WAYPOINT_APP";
 			break;
 		case 66:
 			result.app_name = "RANGE_TEST_APP";
@@ -328,6 +348,9 @@ bool MeshtasticDecoderStandalone::decodeProtobuf(
 				return decodePosition(protobuf_data, packet);
 			case 4: // NODEINFO_APP
 				return decodeNodeInfo(data, packet);
+			case 8: // WAYPOINT_APP
+				// For waypoint, just return success without decoding
+				return true;
 			case 66: // RANGE_TEST_APP
 				// For range test, just return success without decoding
 				return true;
@@ -389,17 +412,9 @@ bool MeshtasticDecoderStandalone::decodeTextMessage(
 			// Extract text directly from bytes 4 to 4+length
 			std::string text(data.begin() + 4, data.begin() + 4 + length);
 
-			// Clean up the text - remove non-printable characters
-			std::string clean_text;
-			for (char c : text)
-			{
-				if (c >= 32 && c <= 126)
-				{ // Printable ASCII characters
-					clean_text += c;
-				}
-			}
-
-			packet.text_message = clean_text;
+			// The text is already in UTF-8 format, so we can use it directly
+			// Just ensure it's null-terminated
+			packet.text_message = text;
 		}
 	}
 
@@ -735,7 +750,9 @@ bool MeshtasticDecoderStandalone::decodeTraceroute(
 				std::vector<uint8_t> route_data(data.begin() + offset,
 											   data.begin() + offset + field_length);
 				
-				// Check if this looks like packed fixed32 values (multiple of 4 bytes)
+				// According to mesh.proto, route field is "repeated fixed32"
+				// This means it should contain 32-bit node IDs, not single bytes
+				// Parse as packed fixed32 values (little-endian)
 				if (route_data.size() % 4 == 0 && route_data.size() >= 4)
 				{
 					// Parse as packed fixed32 values
@@ -750,13 +767,11 @@ bool MeshtasticDecoderStandalone::decodeTraceroute(
 				}
 				else
 				{
-					// Not standard packed fixed32, treat each byte as a separate node ID
-					// This handles the case where we have single bytes like 0x19 (25)
-					for (size_t i = 0; i < route_data.size(); ++i)
-					{
-						uint32_t node_id = static_cast<uint32_t>(route_data[i]);
-						route.push_back(node_id);
-					}
+					// If not multiple of 4 bytes, this might be a different format
+					// or the data might be corrupted. Log this case for debugging.
+					// For now, skip this route data as it doesn't match expected format.
+					// This handles cases where we have single bytes like 0x19 (25)
+					// which are not valid 32-bit node IDs.
 				}
 				
 				offset += field_length;
@@ -837,6 +852,51 @@ uint64_t MeshtasticDecoderStandalone::decodeVarint(
 	return 0;
 }
 
+void MeshtasticDecoderStandalone::calculateSkipAndRouting(DecodedPacket& packet)
+{
+	// In Meshtastic protocol, the hop limit field in flags represents the remaining
+	// hops the packet can take. A packet is heard directly when it hasn't been
+	// relayed yet, which means it still has its full hop limit remaining.
+	
+	// Extract hop limit from flags (bits 0-2: first 3 bits)
+	// According to Meshtastic protocol documentation
+	packet.hop_limit = packet.flags & 0x07;
+	
+	// Extract hop start from flags (bits 5-7: original hop limit)
+	uint8_t hop_start = (packet.flags >> 5) & 0x07;
+	
+	// Calculate hops taken based on Meshtastic protocol
+	// hops_taken = hop_start - hop_limit
+	// This works for both direct and relayed packets
+	packet.skip_count = hop_start - packet.hop_limit;
+	
+	// Determine if packet was heard directly
+	// A packet is "direct" if it's a unicast message (not broadcast) between specific nodes
+	// This indicates direct communication between two nodes, regardless of mesh routing
+	packet.heard_directly = (packet.to_address != 0xFFFFFFFF);
+	
+	// Build routing information string
+	std::stringstream routing_ss;
+	routing_ss << "Hops: " << (int)packet.skip_count << "/" << (int)hop_start;
+	
+	if (packet.heard_directly) {
+		routing_ss << " (Direct)";
+	} else {
+		routing_ss << " (Relayed)";
+		if (packet.next_hop != 0) {
+			routing_ss << " [Next: 0x" << std::hex << std::setfill('0') 
+					   << std::setw(8) << packet.next_hop << "]";
+		}
+	}
+	
+	if (packet.relay_node != 0) {
+		routing_ss << " [Relay: 0x" << std::hex << std::setfill('0') 
+				   << std::setw(8) << packet.relay_node << "]";
+	}
+	
+	packet.routing_info = routing_ss.str();
+}
+
 std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 {
 	std::stringstream json;
@@ -852,17 +912,24 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 	else
 	{
 		json << "  \"header\": {\n";
-		json << "    \"to_address\": \"0x" << std::hex << std::setfill('0')
-			 << std::setw(8) << packet.to_address << "\",\n";
-		json << "    \"from_address\": \"0x" << std::hex << std::setfill('0')
-			 << std::setw(8) << packet.from_address << "\",\n";
-		json << "    \"packet_id\": \"0x" << std::hex << std::setfill('0')
-			 << std::setw(8) << packet.packet_id << "\",\n";
-		json << "    \"flags\": \"0x" << std::hex << std::setfill('0')
+		json << "    \"to_address\": \"0x" << std::uppercase << std::hex << std::setfill('0')
+			 << std::setw(8) << packet.to_address << " (" << std::dec << packet.to_address << ")\",\n";
+		json << "    \"from_address\": \"0x" << std::uppercase << std::hex << std::setfill('0')
+			 << std::setw(8) << packet.from_address << " (" << std::dec << packet.from_address << ")\",\n";
+		json << "    \"packet_id\": \"0x" << std::uppercase << std::hex << std::setfill('0')
+			 << std::setw(8) << packet.packet_id << " (" << std::dec << packet.packet_id << ")\",\n";
+		json << "    \"flags\": \"0x" << std::uppercase << std::hex << std::setfill('0')
 			 << std::setw(2) << (int)packet.flags << "\",\n";
 		json << "    \"channel\": " << std::dec << (int)packet.channel << ",\n";
 		json << "    \"next_hop\": " << (int)packet.next_hop << ",\n";
 		json << "    \"relay_node\": " << (int)packet.relay_node << "\n";
+		json << "  },\n";
+		
+		json << "  \"routing\": {\n";
+		json << "    \"skip_count\": " << (int)packet.skip_count << ",\n";
+		json << "    \"hop_limit\": " << (int)packet.hop_limit << ",\n";
+		json << "    \"heard_directly\": " << (packet.heard_directly ? "true" : "false") << ",\n";
+		json << "    \"routing_info\": \"" << escapeJsonString(packet.routing_info) << "\"\n";
 		json << "  },\n";
 
 		json << "  \"port\": " << (int)packet.port << ",\n";
