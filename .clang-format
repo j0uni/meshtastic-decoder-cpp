@@ -1,0 +1,14 @@
+---
+BasedOnStyle: Mozilla
+AlignAfterOpenBracket: Align
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+BreakAfterJavaFieldAnnotations: 'true'
+BreakBeforeBraces: Allman
+BreakStringLiterals: 'false'
+FixNamespaceComments: 'true'
+IndentCaseLabels: 'true'
+SpaceBeforeParens: ControlStatements
+UseTab: Always
+IndentWidth: 4
+TabWidth: 4

@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.o
+*.obj
+meshtastic_decoder_standalone
+barebones_decoder
+meshtastic_decoder
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Backup files
+*.bak
+*.backup
