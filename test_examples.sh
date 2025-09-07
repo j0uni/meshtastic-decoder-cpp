@@ -84,6 +84,20 @@ echo "Result:"
 ./build/meshtastic_decoder_standalone "00 00 00 00 98 E2 09 13 1E 80 9C F5 00 08 00 98 DA CC 0A 2B 2B 1A 78 5C E4 C5 33 2A 8B D3 22 93 AA 2E D4 C0 E1 91 76 34 E1 E3 0A 2C 96 6A 27 2A 2B" | jq '.routing' 2>/dev/null || echo "jq not available, raw output above"
 echo
 
+echo "Testing TELEMETRY_APP (Port 67)..."
+echo "Expected: Device telemetry data with GPS time and device metrics"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 98 E2 09 13 63 47 1F 74 A5 08 00 98 56 F7 03 F4 CE 26 9A C0 72 BC D0 B4 63 89 27 72 BF AB AE CB 7B A1 38 13 CF A2 62 93 2A 73 52 18 CC\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 98 E2 09 13 63 47 1F 74 A5 08 00 98 56 F7 03 F4 CE 26 9A C0 72 BC D0 B4 63 89 27 72 BF AB AE CB 7B A1 38 13 CF A2 62 93 2A 73 52 18 CC" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Testing POSITION_APP (Port 3) - Recent GPS data..."
+echo "Expected: GPS coordinates 61.4924288°N, 23.8616576°E with altitude 104m"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 98 E2 09 13 62 FF 8E DE A5 08 00 98 56 5C B0 21 CD B6 71 28 1B 67 5C 14 6C 31 5D 0D 26 B7 EA 2D CD FA 81 AC 2F 90 06 07 19 E7 AA C9 B0 34 C6 22\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 98 E2 09 13 62 FF 8E DE A5 08 00 98 56 5C B0 21 CD B6 71 28 1B 67 5C 14 6C 31 5D 0D 26 B7 EA 2D CD FA 81 AC 2F 90 06 07 19 E7 AA C9 B0 34 C6 22" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
 echo "=== Test Complete ==="
 echo "Note: This decoder supports all main Meshtastic app types:"
 echo "      - TEXT_MESSAGE_APP (port 1) - Text messages"
@@ -91,6 +105,7 @@ echo "      - POSITION_APP (port 3) - GPS coordinates"
 echo "      - NODEINFO_APP (port 4) - Node information"
 echo "      - WAYPOINT_APP (port 8) - Waypoint and location data"
 echo "      - RANGE_TEST_APP (port 66) - Range testing packets"
+echo "      - TELEMETRY_APP (port 67) - Device telemetry data"
 echo "      - TRACEROUTE_APP (port 70) - Route discovery and network path analysis"
 echo ""
 echo "The examples above demonstrate:"

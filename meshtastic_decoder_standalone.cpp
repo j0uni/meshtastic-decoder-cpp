@@ -52,6 +52,10 @@ class MeshtasticDecoderStandalone
 		std::string route_path;
 		int route_count;
 		
+		// Telemetry data (for TELEMETRY_APP)
+		std::string telemetry_info;
+		std::string raw_telemetry_hex;
+		
 		// Skip and travel information
 		uint8_t skip_count;
 		bool heard_directly;
@@ -102,6 +106,8 @@ class MeshtasticDecoderStandalone
 						   DecodedPacket& packet);
 	bool decodeNodeInfo(const std::vector<uint8_t>& data,
 						DecodedPacket& packet);
+	bool decodeTelemetry(const std::vector<uint8_t>& data,
+						 DecodedPacket& packet);
 	bool decodeTraceroute(const std::vector<uint8_t>& data,
 						  DecodedPacket& packet);
 	uint64_t decodeVarint(const std::vector<uint8_t>& data, size_t& offset);
@@ -216,6 +222,9 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 			break;
 		case 66:
 			result.app_name = "RANGE_TEST_APP";
+			break;
+		case 67:
+			result.app_name = "TELEMETRY_APP";
 			break;
 		case 70:
 			result.app_name = "TRACEROUTE_APP";
@@ -354,6 +363,8 @@ bool MeshtasticDecoderStandalone::decodeProtobuf(
 			case 66: // RANGE_TEST_APP
 				// For range test, just return success without decoding
 				return true;
+			case 67: // TELEMETRY_APP
+				return decodeTelemetry(protobuf_data, packet);
 			case 70: // TRACEROUTE_APP
 				return decodeTraceroute(protobuf_data, packet);
 			default:
@@ -711,6 +722,37 @@ bool MeshtasticDecoderStandalone::decodeNodeInfo(
 	return true;
 }
 
+bool MeshtasticDecoderStandalone::decodeTelemetry(
+  const std::vector<uint8_t>& data,
+  DecodedPacket& packet)
+{
+	// Parse Telemetry protobuf message
+	// Structure: [telemetry_data]
+	// The protobuf data contains Telemetry message fields
+
+	if (data.empty())
+	{
+		return false;
+	}
+
+	// For now, just store the raw telemetry data
+	// In a full implementation, we would parse the protobuf fields
+	std::stringstream ss;
+	ss << "Telemetry data (" << data.size() << " bytes)";
+	packet.telemetry_info = ss.str();
+
+	// Store raw hex data for debugging
+	ss.str("");
+	ss << std::hex << std::setfill('0');
+	for (uint8_t byte : data)
+	{
+		ss << std::setw(2) << static_cast<int>(byte) << " ";
+	}
+	packet.raw_telemetry_hex = ss.str();
+
+	return true;
+}
+
 bool MeshtasticDecoderStandalone::decodeTraceroute(
   const std::vector<uint8_t>& data,
   DecodedPacket& packet)
@@ -1020,6 +1062,13 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 				first = false;
 			}
 			json << "\n  },\n";
+		}
+		else if (packet.port == 67)
+		{ // TELEMETRY_APP
+			json << "  \"telemetry\": {\n";
+			json << "    \"info\": \"" << escapeJsonString(packet.telemetry_info) << "\",\n";
+			json << "    \"raw_hex\": \"" << escapeJsonString(packet.raw_telemetry_hex) << "\"\n";
+			json << "  },\n";
 		}
 		else if (packet.port == 70)
 		{ // TRACEROUTE_APP
