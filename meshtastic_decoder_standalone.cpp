@@ -32,6 +32,26 @@ class MeshtasticDecoderStandalone
 		double longitude;
 		int32_t altitude;
 		uint32_t timestamp;
+		uint32_t sats_in_view;
+		uint32_t sats_in_use;
+		uint32_t ground_speed;
+		double ground_track; // in degrees (converted from 1/100 degrees)
+		uint32_t gps_accuracy; // in mm
+		// DOP (Dilution of Precision) values - in units (stored as 1/100, converted when displayed)
+		double pdop; // Position DOP
+		double hdop; // Horizontal DOP
+		double vdop; // Vertical DOP
+		uint32_t fix_quality;
+		uint32_t fix_type;
+		uint32_t precision_bits;
+		int32_t altitude_hae; // HAE altitude in meters
+		int32_t altitude_geoidal_separation; // Geoidal separation in meters
+		uint32_t location_source; // enum: 0=UNSET, 1=MANUAL, 2=INTERNAL, 3=EXTERNAL
+		uint32_t altitude_source; // enum: 0=UNSET, 1=MANUAL, 2=INTERNAL, 3=EXTERNAL, 4=BAROMETRIC
+		int32_t timestamp_millis_adjust;
+		uint32_t sensor_id;
+		uint32_t next_update; // seconds until next update
+		uint32_t seq_number;
 
 		// Node info data (for NODEINFO_APP)
 		std::string node_id;
@@ -49,12 +69,108 @@ class MeshtasticDecoderStandalone
 
 		// Traceroute data (for TRACEROUTE_APP)
 		std::vector<uint32_t> route_nodes;
+		std::vector<uint32_t> route_back_nodes;
+		std::vector<int32_t> snr_towards;
+		std::vector<int32_t> snr_back;
 		std::string route_path;
+		std::string route_back_path;
 		int route_count;
+		int route_back_count;
+		std::string route_type; // "route_request" or "route_reply"
 		
 		// Telemetry data (for TELEMETRY_APP)
 		std::string telemetry_info;
 		std::string raw_telemetry_hex;
+		std::string telemetry_type; // device_metrics, environment_metrics, etc.
+		uint32_t telemetry_time;
+		
+		// DeviceMetrics fields
+		uint32_t battery_level;
+		float voltage;
+		float channel_utilization;
+		float air_util_tx;
+		uint32_t uptime_seconds;
+		
+		// EnvironmentMetrics fields
+		float temperature;
+		float relative_humidity;
+		float barometric_pressure;
+		float gas_resistance;
+		float current;
+		uint32_t iaq;
+		float distance;
+		float lux;
+		float white_lux;
+		float ir_lux;
+		float uv_lux;
+		uint32_t wind_direction;
+		float wind_speed;
+		float weight;
+		float wind_gust;
+		float wind_lull;
+		float radiation;
+		float rainfall_1h;
+		float rainfall_24h;
+		uint32_t soil_moisture;
+		float soil_temperature;
+		
+		// AirQualityMetrics fields
+		uint32_t pm10_standard;
+		uint32_t pm25_standard;
+		uint32_t pm100_standard;
+		uint32_t pm10_environmental;
+		uint32_t pm25_environmental;
+		uint32_t pm100_environmental;
+		uint32_t particles_03um;
+		uint32_t particles_05um;
+		uint32_t particles_10um;
+		uint32_t particles_25um;
+		uint32_t particles_50um;
+		uint32_t particles_100um;
+		uint32_t co2;
+		float co2_temperature;
+		float co2_humidity;
+		float form_formaldehyde;
+		float form_humidity;
+		float form_temperature;
+		
+		// PowerMetrics fields (ch1-ch8 voltage/current)
+		float ch1_voltage, ch1_current;
+		float ch2_voltage, ch2_current;
+		float ch3_voltage, ch3_current;
+		float ch4_voltage, ch4_current;
+		float ch5_voltage, ch5_current;
+		float ch6_voltage, ch6_current;
+		float ch7_voltage, ch7_current;
+		float ch8_voltage, ch8_current;
+		
+		// LocalStats fields
+		uint32_t num_packets_tx;
+		uint32_t num_packets_rx;
+		uint32_t num_packets_rx_bad;
+		uint32_t num_online_nodes;
+		uint32_t num_total_nodes;
+		uint32_t num_rx_dupe;
+		uint32_t num_tx_relay;
+		uint32_t num_tx_relay_canceled;
+		uint32_t heap_total_bytes;
+		uint32_t heap_free_bytes;
+		uint32_t num_tx_dropped;
+		
+		// HealthMetrics fields
+		uint32_t heart_bpm;
+		uint32_t spO2;
+		float body_temperature;
+		
+		// HostMetrics fields
+		uint64_t freemem_bytes;
+		uint64_t diskfree1_bytes;
+		uint64_t diskfree2_bytes;
+		uint64_t diskfree3_bytes;
+		uint32_t load1;
+		uint32_t load5;
+		uint32_t load15;
+		std::string host_user_string;
 		
 		// Skip and travel information
 		uint8_t skip_count;
@@ -82,6 +198,11 @@ class MeshtasticDecoderStandalone
 	static std::string escapeJsonString(const std::string& str);
 	static std::string formatDouble(double value, int precision = 7);
 
+  public:
+	// Protobuf decoding (made public for testing)
+	bool decodePosition(const std::vector<uint8_t>& data,
+						DecodedPacket& packet);
+
   private:
 	// Default PSK key (Base64: 1PG7OiApB1nwvP+rz05pAQ==)
 	static const std::vector<uint8_t> DEFAULT_PSK;
@@ -100,8 +221,8 @@ class MeshtasticDecoderStandalone
 	// Protobuf decoding
 	bool decodeProtobuf(const std::vector<uint8_t>& data,
 						DecodedPacket& packet);
-	bool decodePosition(const std::vector<uint8_t>& data,
-						DecodedPacket& packet);
+	void decodeMeshPacketFields(const std::vector<uint8_t>& data,
+								DecodedPacket& packet);
 	bool decodeTextMessage(const std::vector<uint8_t>& data,
 						   DecodedPacket& packet);
 	bool decodeNodeInfo(const std::vector<uint8_t>& data,
@@ -111,6 +232,21 @@ class MeshtasticDecoderStandalone
 	bool decodeTraceroute(const std::vector<uint8_t>& data,
 						  DecodedPacket& packet);
 	uint64_t decodeVarint(const std::vector<uint8_t>& data, size_t& offset);
+	float decodeFloat(const std::vector<uint8_t>& data, size_t& offset);
+	uint64_t decodeUint64(const std::vector<uint8_t>& data, size_t& offset);
+	
+	// Telemetry sub-message decoders
+	void decodeDeviceMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeEnvironmentMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeAirQualityMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodePowerMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeLocalStats(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeHealthMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeHostMetrics(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	
+	// Traceroute sub-message decoders
+	void decodeRouteDiscovery(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void formatRoutePath(const std::vector<uint32_t>& nodes, std::string& path);
 	
 	// Skip and routing calculation
 	void calculateSkipAndRouting(DecodedPacket& packet);
@@ -142,6 +278,25 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 	result.longitude = 0.0;
 	result.altitude = 0;
 	result.timestamp = 0;
+	result.sats_in_view = 0;
+	result.sats_in_use = 0;
+	result.ground_speed = 0;
+	result.ground_track = -1.0; // Use -1.0 as sentinel for "not set"
+	result.gps_accuracy = 0;
+	result.pdop = 0.0;
+	result.hdop = 0.0;
+	result.vdop = 0.0;
+	result.fix_quality = 0;
+	result.fix_type = 0;
+	result.precision_bits = 0;
+	result.altitude_hae = 0;
+	result.altitude_geoidal_separation = 0;
+	result.location_source = 0;
+	result.altitude_source = 0;
+	result.timestamp_millis_adjust = 0;
+	result.sensor_id = 0;
+	result.next_update = 0;
+	result.seq_number = 0;
 	result.node_id = "";
 	result.long_name = "";
 	result.short_name = "";
@@ -153,12 +308,94 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 	result.from_node = "";
 	result.to_node = "";
 	result.route_nodes.clear();
+	result.route_back_nodes.clear();
+	result.snr_towards.clear();
+	result.snr_back.clear();
 	result.route_path = "";
+	result.route_back_path = "";
 	result.route_count = 0;
+	result.route_back_count = 0;
+	result.route_type = "";
 	result.skip_count = 0;
 	result.heard_directly = false;
 	result.hop_limit = 0;
 	result.routing_info = "";
+	result.telemetry_type = "";
+	result.telemetry_time = 0;
+	result.battery_level = 0;
+	result.voltage = 0.0f;
+	result.channel_utilization = 0.0f;
+	result.air_util_tx = 0.0f;
+	result.uptime_seconds = 0;
+	result.temperature = 0.0f;
+	result.relative_humidity = 0.0f;
+	result.barometric_pressure = 0.0f;
+	result.gas_resistance = 0.0f;
+	result.current = 0.0f;
+	result.iaq = 0;
+	result.distance = 0.0f;
+	result.lux = 0.0f;
+	result.white_lux = 0.0f;
+	result.ir_lux = 0.0f;
+	result.uv_lux = 0.0f;
+	result.wind_direction = 0;
+	result.wind_speed = 0.0f;
+	result.weight = 0.0f;
+	result.wind_gust = 0.0f;
+	result.wind_lull = 0.0f;
+	result.radiation = 0.0f;
+	result.rainfall_1h = 0.0f;
+	result.rainfall_24h = 0.0f;
+	result.soil_moisture = 0;
+	result.soil_temperature = 0.0f;
+	result.pm10_standard = 0;
+	result.pm25_standard = 0;
+	result.pm100_standard = 0;
+	result.pm10_environmental = 0;
+	result.pm25_environmental = 0;
+	result.pm100_environmental = 0;
+	result.particles_03um = 0;
+	result.particles_05um = 0;
+	result.particles_10um = 0;
+	result.particles_25um = 0;
+	result.particles_50um = 0;
+	result.particles_100um = 0;
+	result.co2 = 0;
+	result.co2_temperature = 0.0f;
+	result.co2_humidity = 0.0f;
+	result.form_formaldehyde = 0.0f;
+	result.form_humidity = 0.0f;
+	result.form_temperature = 0.0f;
+	result.ch1_voltage = result.ch1_current = 0.0f;
+	result.ch2_voltage = result.ch2_current = 0.0f;
+	result.ch3_voltage = result.ch3_current = 0.0f;
+	result.ch4_voltage = result.ch4_current = 0.0f;
+	result.ch5_voltage = result.ch5_current = 0.0f;
+	result.ch6_voltage = result.ch6_current = 0.0f;
+	result.ch7_voltage = result.ch7_current = 0.0f;
+	result.ch8_voltage = result.ch8_current = 0.0f;
+	result.num_packets_tx = 0;
+	result.num_packets_rx = 0;
+	result.num_packets_rx_bad = 0;
+	result.num_online_nodes = 0;
+	result.num_total_nodes = 0;
+	result.num_rx_dupe = 0;
+	result.num_tx_relay = 0;
+	result.num_tx_relay_canceled = 0;
+	result.heap_total_bytes = 0;
+	result.heap_free_bytes = 0;
+	result.num_tx_dropped = 0;
+	result.heart_bpm = 0;
+	result.spO2 = 0;
+	result.body_temperature = 0.0f;
+	result.freemem_bytes = 0;
+	result.diskfree1_bytes = 0;
+	result.diskfree2_bytes = 0;
+	result.diskfree3_bytes = 0;
+	result.load1 = 0;
+	result.load5 = 0;
+	result.load15 = 0;
+	result.host_user_string = "";
 
 	// Parse header
 	if (!parseHeader(raw_data, result))
@@ -234,6 +471,10 @@ MeshtasticDecoderStandalone::decodePacket(const std::vector<uint8_t>& raw_data)
 			break;
 	}
 
+	// Decode MeshPacket protobuf fields (if present in decrypted payload)
+	// This extracts fields like relay_node (field 19) and next_hop (field 18) from the MeshPacket structure
+	decodeMeshPacketFields(decrypted_payload, result);
+	
 	// Decode protobuf data based on app type
 	if (!decodeProtobuf(decrypted_payload, result))
 	{
@@ -366,6 +607,8 @@ bool MeshtasticDecoderStandalone::decodeProtobuf(
 			case 67: // TELEMETRY_APP
 				return decodeTelemetry(protobuf_data, packet);
 			case 70: // TRACEROUTE_APP
+				// For traceroute, the protobuf_data is the Routing message
+				// (field 2 of Data message contains the Routing message)
 				return decodeTraceroute(protobuf_data, packet);
 			default:
 				// For unknown apps, just return success without decoding
@@ -376,33 +619,384 @@ bool MeshtasticDecoderStandalone::decodeProtobuf(
 	return true;
 }
 
+void MeshtasticDecoderStandalone::decodeMeshPacketFields(
+  const std::vector<uint8_t>& data,
+  DecodedPacket& packet)
+{
+	// Decode MeshPacket protobuf fields from the decrypted payload
+	// MeshPacket structure may contain additional routing information
+	// Fields we're interested in:
+	// - field 18: next_hop (uint32 varint in protobuf) - represents last byte of next hop node
+	// - field 19: relay_node (uint32 varint in protobuf) - represents last byte of relay node
+	// Note: Protobuf defines these as uint32, but semantically they represent the last byte
+	// of the node number. We decode the full uint32 value and extract the last byte.
+	
+	if (data.empty())
+	{
+		return;
+	}
+	
+	size_t offset = 0;
+	
+	// Parse MeshPacket fields
+	while (offset < data.size())
+	{
+		if (offset >= data.size())
+			break;
+		
+		// Read field tag and wire type
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 18: // next_hop (uint32 varint) - last byte of next hop node
+				if (wire_type == 0) // Varint
+				{
+					uint64_t next_hop_val = decodeVarint(data, offset);
+					// Protobuf defines this as uint32, but semantically it represents
+					// the last byte of the node number. Decode full uint32 and extract last byte.
+					// Only update if we got a non-zero value (0 means not set)
+					if (next_hop_val > 0)
+					{
+						packet.next_hop = (next_hop_val & 0xFF);
+					}
+				}
+				break;
+			
+			case 19: // relay_node (uint32 varint) - last byte of relay node
+				if (wire_type == 0) // Varint
+				{
+					uint64_t relay_node_val = decodeVarint(data, offset);
+					// Protobuf defines this as uint32, but semantically it represents
+					// the last byte of the node number. Decode full uint32 and extract last byte.
+					// Only update if we got a non-zero value (0 means not set)
+					if (relay_node_val > 0)
+					{
+						packet.relay_node = (relay_node_val & 0xFF);
+					}
+				}
+				break;
+			
+			default:
+				// Skip other fields - we only care about routing fields here
+				// The actual Data message decoding happens in decodeProtobuf
+				if (wire_type == 0)
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 2)
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				else if (wire_type == 5)
+				{
+					offset += 4; // Skip fixed32
+				}
+				else
+				{
+					offset++;
+				}
+				break;
+		}
+	}
+}
+
 bool MeshtasticDecoderStandalone::decodePosition(
   const std::vector<uint8_t>& data,
   DecodedPacket& packet)
 {
-	// Extract coordinates from the position data
-	// Based on our analysis, the coordinates are stored as 32-bit little-endian
-	// values at specific offsets in the position data
-
-	if (data.size() >= 15)
+	// Parse Position protobuf message according to Meshtastic mesh.proto
+	// Based on actual packet analysis:
+	// - field 1: latitude_i (fixed32) - latitude * 1e7
+	// - field 2: longitude_i (fixed32) - longitude * 1e7
+	// - field 3: altitude (int32 varint) - altitude in meters
+	// - field 4: time (fixed32) - timestamp
+	// - field 5: location_source (enum varint)
+	// - field 11: precision_bits (uint32 varint)
+	// - field 15: altitude_hae (int32 varint) - altitude above ellipsoid
+	// - field 16: altitude_geoidal_separation (int32 varint)
+	// - field 19: PDOP (uint32 varint) - Position Dilution of Precision
+	// - field 23: HDOP (uint32 varint) - Horizontal Dilution of Precision
+	// - field 9: next_hop (uint32 varint)
+	// Additional fields may include sats_in_view, sats_in_use, ground_speed, etc.
+	
+	if (data.empty())
 	{
-		// Latitude is at offset 1-4 (little-endian)
-		uint32_t latitude_i =
-		  data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
-		packet.latitude = latitude_i / 1e7;
-
-		// Longitude is at offset 6-9 (little-endian)
-		uint32_t longitude_i =
-		  data[6] | (data[7] << 8) | (data[8] << 16) | (data[9] << 24);
-		packet.longitude = longitude_i / 1e7;
-
-		// Altitude is at offset 11-12 (little-endian, 16-bit)
-		packet.altitude = data[11] | (data[12] << 8);
-
-		// Time is at offset 13-14 (little-endian, 16-bit)
-		packet.timestamp = data[13] | (data[14] << 8);
+		return false;
 	}
-
+	
+	size_t offset = 0;
+	
+	while (offset < data.size())
+	{
+		if (offset >= data.size())
+			break;
+		
+		// Read field tag and wire type
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		// Parse field based on tag number and wire type
+		switch (field_number)
+		{
+			case 1: // latitude_i (fixed32)
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						uint32_t latitude_i = data[offset] |
+											   (data[offset + 1] << 8) |
+											   (data[offset + 2] << 16) |
+											   (data[offset + 3] << 24);
+						// Convert to signed int32, then to degrees
+						int32_t lat_signed = (int32_t)latitude_i;
+						packet.latitude = lat_signed / 1e7;
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 2: // longitude_i (fixed32)
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						uint32_t longitude_i = data[offset] |
+												(data[offset + 1] << 8) |
+												(data[offset + 2] << 16) |
+												(data[offset + 3] << 24);
+						// Convert to signed int32, then to degrees
+						int32_t lon_signed = (int32_t)longitude_i;
+						packet.longitude = lon_signed / 1e7;
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 3: // altitude (int32 varint) - altitude in meters (signed)
+				if (wire_type == 0) // Varint
+				{
+					uint64_t alt_varint = decodeVarint(data, offset);
+					// Convert varint to signed int32
+					// Mask to 32 bits and cast to int32_t for proper sign extension
+					uint32_t alt_unsigned = alt_varint & 0xFFFFFFFF;
+					// Cast to int32_t - compiler handles sign extension
+					packet.altitude = (int32_t)alt_unsigned;
+				}
+				break;
+			
+			case 4: // time (fixed32) - timestamp or other field
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						// Skip this field for now - might be timestamp or other data
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 5: // location_source (enum varint)
+				if (wire_type == 0) // Varint
+				{
+					packet.location_source = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 6: // altitude_source (enum varint)
+				if (wire_type == 0) // Varint
+				{
+					packet.altitude_source = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 7: // timestamp (fixed32) - positional timestamp in epoch seconds
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						uint32_t ts = data[offset] |
+									  (data[offset + 1] << 8) |
+									  (data[offset + 2] << 16) |
+									  (data[offset + 3] << 24);
+						packet.timestamp = ts;
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 8: // timestamp_millis_adjust (int32 varint)
+				if (wire_type == 0) // Varint
+				{
+					uint64_t adjust_varint = decodeVarint(data, offset);
+					uint32_t adjust_unsigned = adjust_varint & 0xFFFFFFFF;
+					packet.timestamp_millis_adjust = (int32_t)adjust_unsigned;
+				}
+				break;
+			
+			case 9: // altitude_hae (sint32 varint) - HAE altitude in meters
+				if (wire_type == 0) // Varint
+				{
+					uint64_t hae_varint = decodeVarint(data, offset);
+					uint32_t hae_unsigned = hae_varint & 0xFFFFFFFF;
+					packet.altitude_hae = (int32_t)hae_unsigned;
+				}
+				break;
+			
+			case 10: // altitude_geoidal_separation (sint32 varint) - in meters
+				if (wire_type == 0) // Varint
+				{
+					uint64_t sep_varint = decodeVarint(data, offset);
+					uint32_t sep_unsigned = sep_varint & 0xFFFFFFFF;
+					packet.altitude_geoidal_separation = (int32_t)sep_unsigned;
+				}
+				break;
+			
+			case 11: // PDOP (uint32 varint) - Position Dilution of Precision, in 1/100 units
+				if (wire_type == 0) // Varint
+				{
+					uint32_t pdop_raw = decodeVarint(data, offset);
+					packet.pdop = pdop_raw / 100.0; // Convert from 1/100 units
+				}
+				break;
+			
+			case 12: // HDOP (uint32 varint) - Horizontal DOP, in 1/100 units
+				if (wire_type == 0) // Varint
+				{
+					uint32_t hdop_raw = decodeVarint(data, offset);
+					packet.hdop = hdop_raw / 100.0; // Convert from 1/100 units
+				}
+				break;
+			
+			case 13: // VDOP (uint32 varint) - Vertical DOP, in 1/100 units
+				if (wire_type == 0) // Varint
+				{
+					uint32_t vdop_raw = decodeVarint(data, offset);
+					packet.vdop = vdop_raw / 100.0; // Convert from 1/100 units
+				}
+				break;
+			
+			case 14: // gps_accuracy (uint32 varint) - GPS accuracy in mm
+				if (wire_type == 0) // Varint
+				{
+					packet.gps_accuracy = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 15: // ground_speed (uint32 varint) - ground speed in m/s
+				if (wire_type == 0) // Varint
+				{
+					packet.ground_speed = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 16: // ground_track (uint32 varint) - ground track in 1/100 degrees
+				if (wire_type == 0) // Varint
+				{
+					uint32_t track_raw = decodeVarint(data, offset);
+					double track_degrees = track_raw / 100.0; // Convert from 1/100 degrees to degrees
+					// Validate: ground_track should be in range 0-360 degrees
+					// If the value seems reasonable (0-36000 in 1/100 units), use it
+					if (track_raw <= 36000)
+					{
+						packet.ground_track = track_degrees;
+					}
+					// Otherwise, the field might contain invalid data or be used for something else
+				}
+				break;
+			
+			case 17: // fix_quality (uint32 varint) - GPS fix quality
+				if (wire_type == 0) // Varint
+				{
+					packet.fix_quality = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 18: // fix_type (uint32 varint) - GPS fix type 2D/3D
+				if (wire_type == 0) // Varint
+				{
+					packet.fix_type = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 19: // sats_in_view (uint32 varint) - satellites in view
+				if (wire_type == 0) // Varint
+				{
+					packet.sats_in_view = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 20: // sensor_id (uint32 varint) - Sensor ID
+				if (wire_type == 0) // Varint
+				{
+					packet.sensor_id = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 21: // next_update (uint32 varint) - seconds until next update
+				if (wire_type == 0) // Varint
+				{
+					packet.next_update = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 22: // seq_number (uint32 varint) - sequence number
+				if (wire_type == 0) // Varint
+				{
+					packet.seq_number = decodeVarint(data, offset);
+				}
+				break;
+			
+			case 23: // precision_bits (uint32 varint) - bits of precision
+				// Note: Some packets may use this field for sats_in_use,
+				// but according to protobuf it's precision_bits
+				if (wire_type == 0) // Varint
+				{
+					uint32_t val = decodeVarint(data, offset);
+					// If value is reasonable for precision_bits (typically 0-32), use as precision_bits
+					// If value is large (like 32), it might be sats_in_use, but we'll use it as precision_bits
+					packet.precision_bits = val;
+					// If it looks like a satellite count (reasonable range), also set sats_in_use
+					if (val > 0 && val <= 50)
+					{
+						packet.sats_in_use = val;
+					}
+				}
+				break;
+			
+			default:
+				// Skip unknown fields
+				if (wire_type == 0)
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 2)
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				else if (wire_type == 5)
+				{
+					offset += 4; // Skip fixed32
+				}
+				else
+				{
+					offset++;
+				}
+				break;
+		}
+	}
+	
 	return true;
 }
 
@@ -726,23 +1320,25 @@ bool MeshtasticDecoderStandalone::decodeTelemetry(
   const std::vector<uint8_t>& data,
   DecodedPacket& packet)
 {
-	// Parse Telemetry protobuf message
-	// Structure: [telemetry_data]
-	// The protobuf data contains Telemetry message fields
+	// Parse Telemetry protobuf message according to Meshtastic telemetry.proto
+	// Telemetry message structure:
+	// - field 1: time (fixed32)
+	// - oneof variant (fields 2-8):
+	//   - field 2: DeviceMetrics (device_metrics)
+	//   - field 3: EnvironmentMetrics (environment_metrics)
+	//   - field 4: AirQualityMetrics (air_quality_metrics)
+	//   - field 5: PowerMetrics (power_metrics)
+	//   - field 6: LocalStats (local_stats)
+	//   - field 7: HealthMetrics (health_metrics)
+	//   - field 8: HostMetrics (host_metrics)
 
 	if (data.empty())
 	{
 		return false;
 	}
 
-	// For now, just store the raw telemetry data
-	// In a full implementation, we would parse the protobuf fields
-	std::stringstream ss;
-	ss << "Telemetry data (" << data.size() << " bytes)";
-	packet.telemetry_info = ss.str();
-
 	// Store raw hex data for debugging
-	ss.str("");
+	std::stringstream ss;
 	ss << std::hex << std::setfill('0');
 	for (uint8_t byte : data)
 	{
@@ -750,30 +1346,15 @@ bool MeshtasticDecoderStandalone::decodeTelemetry(
 	}
 	packet.raw_telemetry_hex = ss.str();
 
-	return true;
-}
-
-bool MeshtasticDecoderStandalone::decodeTraceroute(
-  const std::vector<uint8_t>& data,
-  DecodedPacket& packet)
-{
-	// Parse RouteDiscovery protobuf message according to Meshtastic mesh.proto specification
-	// RouteDiscovery message fields:
-	// - repeated fixed32 route = 2;  // List of node IDs in the route path
-	
 	size_t offset = 0;
-	std::vector<uint32_t> route;
 	
-	// The data should be the RouteDiscovery protobuf: 12 01 19
-	// 12 = field 2, wire type 2 (length-delimited)
-	// 01 = length 1
-	// 19 = single byte value (25 decimal)
-	
+	// Parse Telemetry message fields
 	while (offset < data.size())
 	{
 		if (offset >= data.size())
 			break;
 		
+		// Read field tag and wire type
 		uint64_t tag_wire_type = decodeVarint(data, offset);
 		if (tag_wire_type == 0)
 			break;
@@ -781,43 +1362,814 @@ bool MeshtasticDecoderStandalone::decodeTraceroute(
 		uint8_t field_number = tag_wire_type >> 3;
 		uint8_t wire_type = tag_wire_type & 0x07;
 		
-		if (field_number == 2 && wire_type == 2)
+		switch (field_number)
 		{
-			// Field 2: repeated fixed32 route (length-delimited)
-			uint64_t field_length = decodeVarint(data, offset);
-			
-			if (field_length > 0 && offset + field_length <= data.size())
-			{
-				// Extract the route data
-				std::vector<uint8_t> route_data(data.begin() + offset,
-											   data.begin() + offset + field_length);
-				
-				// According to mesh.proto, route field is "repeated fixed32"
-				// This means it should contain 32-bit node IDs, not single bytes
-				// Parse as packed fixed32 values (little-endian)
-				if (route_data.size() % 4 == 0 && route_data.size() >= 4)
+			case 1: // time (fixed32)
+				if (wire_type == 5) // Fixed32
 				{
-					// Parse as packed fixed32 values
-					for (size_t i = 0; i < route_data.size(); i += 4)
+					if (offset + 4 <= data.size())
 					{
-						uint32_t node_id = route_data[i] |
-										   (route_data[i + 1] << 8) |
-										   (route_data[i + 2] << 16) |
-										   (route_data[i + 3] << 24);
-						route.push_back(node_id);
+						packet.telemetry_time = data[offset] |
+												(data[offset + 1] << 8) |
+												(data[offset + 2] << 16) |
+												(data[offset + 3] << 24);
+						offset += 4;
 					}
+				}
+				break;
+			
+			case 2: // DeviceMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "device_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeDeviceMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 3: // EnvironmentMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "environment_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeEnvironmentMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 4: // AirQualityMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "air_quality_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeAirQualityMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 5: // PowerMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "power_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodePowerMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 6: // LocalStats (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "local_stats";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeLocalStats(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 7: // HealthMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "health_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeHealthMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 8: // HostMetrics (length-delimited)
+				if (wire_type == 2)
+				{
+					packet.telemetry_type = "host_metrics";
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						std::vector<uint8_t> metrics_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+						decodeHostMetrics(metrics_data, packet);
+						offset += field_length;
+					}
+				}
+				break;
+			
+			default:
+				// Skip unknown fields
+				if (wire_type == 0)
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 2)
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				else if (wire_type == 5)
+				{
+					offset += 4; // Skip fixed32
 				}
 				else
 				{
-					// If not multiple of 4 bytes, this might be a different format
-					// or the data might be corrupted. Log this case for debugging.
-					// For now, skip this route data as it doesn't match expected format.
-					// This handles cases where we have single bytes like 0x19 (25)
-					// which are not valid 32-bit node IDs.
+					offset++;
 				}
-				
+				break;
+		}
+	}
+	
+	// Build telemetry info string
+	std::stringstream info_ss;
+	info_ss << "Telemetry (" << packet.telemetry_type << ")";
+	if (packet.telemetry_time > 0)
+	{
+		info_ss << " - Time: " << packet.telemetry_time;
+	}
+	packet.telemetry_info = info_ss.str();
+
+	return true;
+}
+
+void MeshtasticDecoderStandalone::decodeDeviceMetrics(const std::vector<uint8_t>& data,
+													  DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // battery_level (uint32 varint)
+				if (wire_type == 0)
+					packet.battery_level = decodeVarint(data, offset);
+				break;
+			case 2: // voltage (float)
+				if (wire_type == 5)
+					packet.voltage = decodeFloat(data, offset);
+				break;
+			case 3: // channel_utilization (float)
+				if (wire_type == 5)
+					packet.channel_utilization = decodeFloat(data, offset);
+				break;
+			case 4: // air_util_tx (float)
+				if (wire_type == 5)
+					packet.air_util_tx = decodeFloat(data, offset);
+				break;
+			case 5: // uptime_seconds (uint32 varint)
+				if (wire_type == 0)
+					packet.uptime_seconds = decodeVarint(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodeEnvironmentMetrics(const std::vector<uint8_t>& data,
+															DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // temperature (float)
+				if (wire_type == 5)
+					packet.temperature = decodeFloat(data, offset);
+				break;
+			case 2: // relative_humidity (float)
+				if (wire_type == 5)
+					packet.relative_humidity = decodeFloat(data, offset);
+				break;
+			case 3: // barometric_pressure (float)
+				if (wire_type == 5)
+					packet.barometric_pressure = decodeFloat(data, offset);
+				break;
+			case 4: // gas_resistance (float)
+				if (wire_type == 5)
+					packet.gas_resistance = decodeFloat(data, offset);
+				break;
+			case 5: // voltage (float)
+				if (wire_type == 5)
+					packet.voltage = decodeFloat(data, offset);
+				break;
+			case 6: // current (float)
+				if (wire_type == 5)
+					packet.current = decodeFloat(data, offset);
+				break;
+			case 7: // iaq (uint32 varint)
+				if (wire_type == 0)
+					packet.iaq = decodeVarint(data, offset);
+				break;
+			case 8: // distance (float)
+				if (wire_type == 5)
+					packet.distance = decodeFloat(data, offset);
+				break;
+			case 9: // lux (float)
+				if (wire_type == 5)
+					packet.lux = decodeFloat(data, offset);
+				break;
+			case 10: // white_lux (float)
+				if (wire_type == 5)
+					packet.white_lux = decodeFloat(data, offset);
+				break;
+			case 11: // ir_lux (float)
+				if (wire_type == 5)
+					packet.ir_lux = decodeFloat(data, offset);
+				break;
+			case 12: // uv_lux (float)
+				if (wire_type == 5)
+					packet.uv_lux = decodeFloat(data, offset);
+				break;
+			case 13: // wind_direction (uint32 varint)
+				if (wire_type == 0)
+					packet.wind_direction = decodeVarint(data, offset);
+				break;
+			case 14: // wind_speed (float)
+				if (wire_type == 5)
+					packet.wind_speed = decodeFloat(data, offset);
+				break;
+			case 15: // weight (float)
+				if (wire_type == 5)
+					packet.weight = decodeFloat(data, offset);
+				break;
+			case 16: // wind_gust (float)
+				if (wire_type == 5)
+					packet.wind_gust = decodeFloat(data, offset);
+				break;
+			case 17: // wind_lull (float)
+				if (wire_type == 5)
+					packet.wind_lull = decodeFloat(data, offset);
+				break;
+			case 18: // radiation (float)
+				if (wire_type == 5)
+					packet.radiation = decodeFloat(data, offset);
+				break;
+			case 19: // rainfall_1h (float)
+				if (wire_type == 5)
+					packet.rainfall_1h = decodeFloat(data, offset);
+				break;
+			case 20: // rainfall_24h (float)
+				if (wire_type == 5)
+					packet.rainfall_24h = decodeFloat(data, offset);
+				break;
+			case 21: // soil_moisture (uint32 varint)
+				if (wire_type == 0)
+					packet.soil_moisture = decodeVarint(data, offset);
+				break;
+			case 22: // soil_temperature (float)
+				if (wire_type == 5)
+					packet.soil_temperature = decodeFloat(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodeAirQualityMetrics(const std::vector<uint8_t>& data,
+														   DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // pm10_standard (uint32 varint)
+				if (wire_type == 0)
+					packet.pm10_standard = decodeVarint(data, offset);
+				break;
+			case 2: // pm25_standard (uint32 varint)
+				if (wire_type == 0)
+					packet.pm25_standard = decodeVarint(data, offset);
+				break;
+			case 3: // pm100_standard (uint32 varint)
+				if (wire_type == 0)
+					packet.pm100_standard = decodeVarint(data, offset);
+				break;
+			case 4: // pm10_environmental (uint32 varint)
+				if (wire_type == 0)
+					packet.pm10_environmental = decodeVarint(data, offset);
+				break;
+			case 5: // pm25_environmental (uint32 varint)
+				if (wire_type == 0)
+					packet.pm25_environmental = decodeVarint(data, offset);
+				break;
+			case 6: // pm100_environmental (uint32 varint)
+				if (wire_type == 0)
+					packet.pm100_environmental = decodeVarint(data, offset);
+				break;
+			case 7: // particles_03um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_03um = decodeVarint(data, offset);
+				break;
+			case 8: // particles_05um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_05um = decodeVarint(data, offset);
+				break;
+			case 9: // particles_10um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_10um = decodeVarint(data, offset);
+				break;
+			case 10: // particles_25um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_25um = decodeVarint(data, offset);
+				break;
+			case 11: // particles_50um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_50um = decodeVarint(data, offset);
+				break;
+			case 12: // particles_100um (uint32 varint)
+				if (wire_type == 0)
+					packet.particles_100um = decodeVarint(data, offset);
+				break;
+			case 13: // co2 (uint32 varint)
+				if (wire_type == 0)
+					packet.co2 = decodeVarint(data, offset);
+				break;
+			case 14: // co2_temperature (float)
+				if (wire_type == 5)
+					packet.co2_temperature = decodeFloat(data, offset);
+				break;
+			case 15: // co2_humidity (float)
+				if (wire_type == 5)
+					packet.co2_humidity = decodeFloat(data, offset);
+				break;
+			case 16: // form_formaldehyde (float)
+				if (wire_type == 5)
+					packet.form_formaldehyde = decodeFloat(data, offset);
+				break;
+			case 17: // form_humidity (float)
+				if (wire_type == 5)
+					packet.form_humidity = decodeFloat(data, offset);
+				break;
+			case 18: // form_temperature (float)
+				if (wire_type == 5)
+					packet.form_temperature = decodeFloat(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodePowerMetrics(const std::vector<uint8_t>& data,
+													  DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // ch1_voltage (float)
+				if (wire_type == 5)
+					packet.ch1_voltage = decodeFloat(data, offset);
+				break;
+			case 2: // ch1_current (float)
+				if (wire_type == 5)
+					packet.ch1_current = decodeFloat(data, offset);
+				break;
+			case 3: // ch2_voltage (float)
+				if (wire_type == 5)
+					packet.ch2_voltage = decodeFloat(data, offset);
+				break;
+			case 4: // ch2_current (float)
+				if (wire_type == 5)
+					packet.ch2_current = decodeFloat(data, offset);
+				break;
+			case 5: // ch3_voltage (float)
+				if (wire_type == 5)
+					packet.ch3_voltage = decodeFloat(data, offset);
+				break;
+			case 6: // ch3_current (float)
+				if (wire_type == 5)
+					packet.ch3_current = decodeFloat(data, offset);
+				break;
+			case 7: // ch4_voltage (float)
+				if (wire_type == 5)
+					packet.ch4_voltage = decodeFloat(data, offset);
+				break;
+			case 8: // ch4_current (float)
+				if (wire_type == 5)
+					packet.ch4_current = decodeFloat(data, offset);
+				break;
+			case 9: // ch5_voltage (float)
+				if (wire_type == 5)
+					packet.ch5_voltage = decodeFloat(data, offset);
+				break;
+			case 10: // ch5_current (float)
+				if (wire_type == 5)
+					packet.ch5_current = decodeFloat(data, offset);
+				break;
+			case 11: // ch6_voltage (float)
+				if (wire_type == 5)
+					packet.ch6_voltage = decodeFloat(data, offset);
+				break;
+			case 12: // ch6_current (float)
+				if (wire_type == 5)
+					packet.ch6_current = decodeFloat(data, offset);
+				break;
+			case 13: // ch7_voltage (float)
+				if (wire_type == 5)
+					packet.ch7_voltage = decodeFloat(data, offset);
+				break;
+			case 14: // ch7_current (float)
+				if (wire_type == 5)
+					packet.ch7_current = decodeFloat(data, offset);
+				break;
+			case 15: // ch8_voltage (float)
+				if (wire_type == 5)
+					packet.ch8_voltage = decodeFloat(data, offset);
+				break;
+			case 16: // ch8_current (float)
+				if (wire_type == 5)
+					packet.ch8_current = decodeFloat(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodeLocalStats(const std::vector<uint8_t>& data,
+													DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // uptime_seconds (uint32 varint)
+				if (wire_type == 0)
+					packet.uptime_seconds = decodeVarint(data, offset);
+				break;
+			case 2: // channel_utilization (float)
+				if (wire_type == 5)
+					packet.channel_utilization = decodeFloat(data, offset);
+				break;
+			case 3: // air_util_tx (float)
+				if (wire_type == 5)
+					packet.air_util_tx = decodeFloat(data, offset);
+				break;
+			case 4: // num_packets_tx (uint32 varint)
+				if (wire_type == 0)
+					packet.num_packets_tx = decodeVarint(data, offset);
+				break;
+			case 5: // num_packets_rx (uint32 varint)
+				if (wire_type == 0)
+					packet.num_packets_rx = decodeVarint(data, offset);
+				break;
+			case 6: // num_packets_rx_bad (uint32 varint)
+				if (wire_type == 0)
+					packet.num_packets_rx_bad = decodeVarint(data, offset);
+				break;
+			case 7: // num_online_nodes (uint32 varint)
+				if (wire_type == 0)
+					packet.num_online_nodes = decodeVarint(data, offset);
+				break;
+			case 8: // num_total_nodes (uint32 varint)
+				if (wire_type == 0)
+					packet.num_total_nodes = decodeVarint(data, offset);
+				break;
+			case 9: // num_rx_dupe (uint32 varint)
+				if (wire_type == 0)
+					packet.num_rx_dupe = decodeVarint(data, offset);
+				break;
+			case 10: // num_tx_relay (uint32 varint)
+				if (wire_type == 0)
+					packet.num_tx_relay = decodeVarint(data, offset);
+				break;
+			case 11: // num_tx_relay_canceled (uint32 varint)
+				if (wire_type == 0)
+					packet.num_tx_relay_canceled = decodeVarint(data, offset);
+				break;
+			case 12: // heap_total_bytes (uint32 varint)
+				if (wire_type == 0)
+					packet.heap_total_bytes = decodeVarint(data, offset);
+				break;
+			case 13: // heap_free_bytes (uint32 varint)
+				if (wire_type == 0)
+					packet.heap_free_bytes = decodeVarint(data, offset);
+				break;
+			case 14: // num_tx_dropped (uint32 varint)
+				if (wire_type == 0)
+					packet.num_tx_dropped = decodeVarint(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodeHealthMetrics(const std::vector<uint8_t>& data,
+													   DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // heart_bpm (uint32 varint)
+				if (wire_type == 0)
+					packet.heart_bpm = decodeVarint(data, offset);
+				break;
+			case 2: // spO2 (uint32 varint)
+				if (wire_type == 0)
+					packet.spO2 = decodeVarint(data, offset);
+				break;
+			case 3: // body_temperature (float)
+				if (wire_type == 5)
+					packet.body_temperature = decodeFloat(data, offset);
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::decodeHostMetrics(const std::vector<uint8_t>& data,
+													 DecodedPacket& packet)
+{
+	size_t offset = 0;
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // uptime_seconds (uint32 varint)
+				if (wire_type == 0)
+					packet.uptime_seconds = decodeVarint(data, offset);
+				break;
+			case 2: // freemem_bytes (uint64 varint)
+				if (wire_type == 0)
+					packet.freemem_bytes = decodeVarint(data, offset);
+				break;
+			case 3: // diskfree1_bytes (uint64 varint)
+				if (wire_type == 0)
+					packet.diskfree1_bytes = decodeVarint(data, offset);
+				break;
+			case 4: // diskfree2_bytes (uint64 varint)
+				if (wire_type == 0)
+					packet.diskfree2_bytes = decodeVarint(data, offset);
+				break;
+			case 5: // diskfree3_bytes (uint64 varint)
+				if (wire_type == 0)
+					packet.diskfree3_bytes = decodeVarint(data, offset);
+				break;
+			case 6: // load1 (uint32 varint)
+				if (wire_type == 0)
+					packet.load1 = decodeVarint(data, offset);
+				break;
+			case 7: // load5 (uint32 varint)
+				if (wire_type == 0)
+					packet.load5 = decodeVarint(data, offset);
+				break;
+			case 8: // load15 (uint32 varint)
+				if (wire_type == 0)
+					packet.load15 = decodeVarint(data, offset);
+				break;
+			case 9: // host_user_string (string)
+				if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					if (len > 0 && offset + len <= data.size())
+					{
+						packet.host_user_string = std::string(data.begin() + offset,
+															  data.begin() + offset + len);
+						offset += len;
+					}
+				}
+				break;
+			default:
+				if (wire_type == 0)
+					decodeVarint(data, offset);
+				else if (wire_type == 5)
+					offset += 4;
+				else if (wire_type == 2)
+				{
+					uint64_t len = decodeVarint(data, offset);
+					offset += len;
+				}
+				else
+					offset++;
+				break;
+		}
+	}
+}
+
+bool MeshtasticDecoderStandalone::decodeTraceroute(
+  const std::vector<uint8_t>& data,
+  DecodedPacket& packet)
+{
+	// Parse Routing protobuf message according to Meshtastic mesh.proto specification
+	// Routing message structure:
+	// - oneof variant:
+	//   - field 1: RouteDiscovery route_request (length-delimited)
+	//   - field 2: RouteDiscovery route_reply (length-delimited)
+	//   - field 3: Error error_reason (varint)
+	//
+	// RouteDiscovery message fields:
+	// - field 1: repeated fixed32 route
+	// - field 2: repeated int32 snr_towards
+	// - field 3: repeated fixed32 route_back
+	// - field 4: repeated int32 snr_back
+	
+	if (data.empty())
+	{
+		return false;
+	}
+	
+	size_t offset = 0;
+	
+	// First, decode the Routing message to get the RouteDiscovery
+	// Note: Both field 1 (route_request) and field 2 (route_reply) are RouteDiscovery messages
+	// They may contain different parts (route nodes vs SNR values), so we need to merge them
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		if (field_number == 1 && wire_type == 2)
+		{
+			// Field 1: RouteDiscovery route_request (length-delimited)
+			packet.route_type = "route_request";
+			uint64_t field_length = decodeVarint(data, offset);
+			if (field_length > 0 && offset + field_length <= data.size())
+			{
+				std::vector<uint8_t> route_discovery_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+				decodeRouteDiscovery(route_discovery_data, packet);
 				offset += field_length;
 			}
+		}
+		else if (field_number == 2 && wire_type == 2)
+		{
+			// Field 2: RouteDiscovery route_reply (length-delimited)
+			// This may contain route nodes, SNR values, or both
+			if (packet.route_type.empty())
+			{
+				packet.route_type = "route_reply";
+			}
+			uint64_t field_length = decodeVarint(data, offset);
+			if (field_length > 0 && offset + field_length <= data.size())
+			{
+				std::vector<uint8_t> route_discovery_data(data.begin() + offset,
+														 data.begin() + offset + field_length);
+				// Decode this RouteDiscovery message and merge with existing data
+				decodeRouteDiscovery(route_discovery_data, packet);
+				offset += field_length;
+			}
+		}
+		else if (field_number == 3 && wire_type == 0)
+		{
+			// Field 3: Error error_reason (varint)
+			// Decode and skip for now (could store error code if needed)
+			decodeVarint(data, offset);
 		}
 		else
 		{
@@ -837,33 +2189,279 @@ bool MeshtasticDecoderStandalone::decodeTraceroute(
 			}
 			else
 			{
-				break; // Unknown wire type
+				offset++;
 			}
 		}
 	}
 	
-	// Store route information
-	packet.route_nodes = route;
-	packet.route_count = route.size();
+	// Format route paths
+	formatRoutePath(packet.route_nodes, packet.route_path);
+	formatRoutePath(packet.route_back_nodes, packet.route_back_path);
 	
-	// Format route as readable path
-	if (!route.empty())
-	{
-		std::stringstream route_path_ss;
-		for (size_t i = 0; i < route.size(); ++i)
-		{
-			if (i > 0)
-				route_path_ss << " → ";
-			
-			// Format node ID as hex string
-			std::stringstream node_ss;
-			node_ss << "!" << std::hex << std::setfill('0') << std::setw(8) << route[i];
-			route_path_ss << node_ss.str();
-		}
-		packet.route_path = route_path_ss.str();
-	}
+	packet.route_count = packet.route_nodes.size();
+	packet.route_back_count = packet.route_back_nodes.size();
 	
 	return true;
+}
+
+void MeshtasticDecoderStandalone::decodeRouteDiscovery(
+  const std::vector<uint8_t>& data,
+  DecodedPacket& packet)
+{
+	// Parse RouteDiscovery protobuf message according to Meshtastic mesh.proto
+	// RouteDiscovery message fields:
+	// - field 1: repeated fixed32 route
+	// - field 2: repeated int32 snr_towards
+	// - field 3: repeated fixed32 route_back
+	// - field 4: repeated int32 snr_back
+	//
+	// Note: In some cases, the RouteDiscovery message may contain just packed
+	// fixed32 values without field tags (non-standard but used by Meshtastic)
+	
+	if (data.empty())
+	{
+		return;
+	}
+	
+	size_t offset = 0;
+	
+	// Check if the data starts with a valid field tag
+	// If not, it might be packed values directly (non-standard encoding)
+	if (offset < data.size())
+	{
+		uint8_t first_byte = data[offset];
+		uint8_t first_field = first_byte >> 3;
+		uint8_t first_wire_type = first_byte & 0x07;
+		
+		// If the first byte doesn't look like a valid field tag for RouteDiscovery,
+		// try parsing as packed values
+		if (first_field > 4 || first_wire_type > 5)
+		{
+			// Check if it's packed fixed32 route values (size is multiple of 4)
+			if (data.size() % 4 == 0)
+			{
+				// Likely packed fixed32 route values without field tag
+				for (size_t i = 0; i < data.size(); i += 4)
+				{
+					if (i + 4 <= data.size())
+					{
+						uint32_t node_id = data[i] |
+										   (data[i + 1] << 8) |
+										   (data[i + 2] << 16) |
+										   (data[i + 3] << 24);
+						packet.route_nodes.push_back(node_id);
+					}
+				}
+				return;
+			}
+			else
+			{
+				// Might be packed int32 varints for SNR values
+				// Try parsing as packed varints
+				size_t snr_offset = 0;
+				while (snr_offset < data.size())
+				{
+					uint64_t snr_val = decodeVarint(data, snr_offset);
+					// Convert to signed int32 using two's complement
+					// Protobuf int32 uses two's complement encoding
+					uint32_t val_32 = snr_val & 0xFFFFFFFF;
+					int32_t snr_signed;
+					if (val_32 & 0x80000000)
+					{
+						snr_signed = (int32_t)(val_32 - 0x100000000);
+					}
+					else
+					{
+						snr_signed = (int32_t)val_32;
+					}
+					packet.snr_towards.push_back(snr_signed);
+					
+					// Safety check to avoid infinite loop
+					if (snr_offset >= data.size())
+						break;
+				}
+				return;
+			}
+		}
+	}
+	
+	while (offset < data.size())
+	{
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // repeated fixed32 route
+				if (wire_type == 5) // Fixed32
+				{
+					// Repeated fixed32 fields are not packed in protobuf
+					// Each value appears with its field tag
+					if (offset + 4 <= data.size())
+					{
+						uint32_t node_id = data[offset] |
+										   (data[offset + 1] << 8) |
+										   (data[offset + 2] << 16) |
+										   (data[offset + 3] << 24);
+						packet.route_nodes.push_back(node_id);
+						offset += 4;
+					}
+				}
+				else if (wire_type == 2)
+				{
+					// Length-delimited (packed repeated fixed32)
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size() && field_length % 4 == 0)
+					{
+						// Parse packed fixed32 values
+						for (size_t i = 0; i < field_length; i += 4)
+						{
+							uint32_t node_id = data[offset + i] |
+											   (data[offset + i + 1] << 8) |
+											   (data[offset + i + 2] << 16) |
+											   (data[offset + i + 3] << 24);
+							packet.route_nodes.push_back(node_id);
+						}
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 2: // repeated int32 snr_towards
+				if (wire_type == 0) // Varint
+				{
+					// Repeated varint fields are not packed
+					// Each value appears with its field tag
+					uint64_t snr_val = decodeVarint(data, offset);
+					// Convert to signed int32
+					int32_t snr_signed = (int32_t)(snr_val & 0xFFFFFFFF);
+					packet.snr_towards.push_back(snr_signed);
+				}
+				else if (wire_type == 2)
+				{
+					// Length-delimited (packed repeated varint)
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						size_t packed_offset = offset;
+						while (packed_offset < offset + field_length)
+						{
+							uint64_t snr_val = decodeVarint(data, packed_offset);
+							int32_t snr_signed = (int32_t)(snr_val & 0xFFFFFFFF);
+							packet.snr_towards.push_back(snr_signed);
+						}
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 3: // repeated fixed32 route_back
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						uint32_t node_id = data[offset] |
+										   (data[offset + 1] << 8) |
+										   (data[offset + 2] << 16) |
+										   (data[offset + 3] << 24);
+						packet.route_back_nodes.push_back(node_id);
+						offset += 4;
+					}
+				}
+				else if (wire_type == 2)
+				{
+					// Length-delimited (packed repeated fixed32)
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size() && field_length % 4 == 0)
+					{
+						for (size_t i = 0; i < field_length; i += 4)
+						{
+							uint32_t node_id = data[offset + i] |
+											   (data[offset + i + 1] << 8) |
+											   (data[offset + i + 2] << 16) |
+											   (data[offset + i + 3] << 24);
+							packet.route_back_nodes.push_back(node_id);
+						}
+						offset += field_length;
+					}
+				}
+				break;
+			
+			case 4: // repeated int32 snr_back
+				if (wire_type == 0) // Varint
+				{
+					uint64_t snr_val = decodeVarint(data, offset);
+					int32_t snr_signed = (int32_t)(snr_val & 0xFFFFFFFF);
+					packet.snr_back.push_back(snr_signed);
+				}
+				else if (wire_type == 2)
+				{
+					// Length-delimited (packed repeated varint)
+					uint64_t field_length = decodeVarint(data, offset);
+					if (field_length > 0 && offset + field_length <= data.size())
+					{
+						size_t packed_offset = offset;
+						while (packed_offset < offset + field_length)
+						{
+							uint64_t snr_val = decodeVarint(data, packed_offset);
+							int32_t snr_signed = (int32_t)(snr_val & 0xFFFFFFFF);
+							packet.snr_back.push_back(snr_signed);
+						}
+						offset += field_length;
+					}
+				}
+				break;
+			
+			default:
+				// Skip unknown fields
+				if (wire_type == 0)
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 2)
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				else if (wire_type == 5)
+				{
+					offset += 4; // Skip fixed32
+				}
+				else
+				{
+					offset++;
+				}
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoderStandalone::formatRoutePath(
+  const std::vector<uint32_t>& nodes,
+  std::string& path)
+{
+	if (nodes.empty())
+	{
+		path = "";
+		return;
+	}
+	
+	std::stringstream route_path_ss;
+	for (size_t i = 0; i < nodes.size(); ++i)
+	{
+		if (i > 0)
+			route_path_ss << " → ";
+		
+		// Format node ID as hex string
+		std::stringstream node_ss;
+		node_ss << "!" << std::hex << std::setfill('0') << std::setw(8) << nodes[i];
+		route_path_ss << node_ss.str();
+	}
+	path = route_path_ss.str();
 }
 
 uint64_t MeshtasticDecoderStandalone::decodeVarint(
@@ -892,6 +2490,47 @@ uint64_t MeshtasticDecoderStandalone::decodeVarint(
 	}
 
 	return 0;
+}
+
+float MeshtasticDecoderStandalone::decodeFloat(const std::vector<uint8_t>& data,
+											   size_t& offset)
+{
+	if (offset + 4 > data.size())
+	{
+		return 0.0f;
+	}
+	
+	// Float is stored as 32-bit little-endian IEEE 754
+	uint32_t bits = data[offset] |
+					(data[offset + 1] << 8) |
+					(data[offset + 2] << 16) |
+					(data[offset + 3] << 24);
+	offset += 4;
+	
+	// Reinterpret bits as float
+	float result;
+	memcpy(&result, &bits, sizeof(float));
+	return result;
+}
+
+uint64_t MeshtasticDecoderStandalone::decodeUint64(const std::vector<uint8_t>& data,
+													size_t& offset)
+{
+	if (offset + 8 > data.size())
+	{
+		return 0;
+	}
+	
+	uint64_t result = (uint64_t)data[offset] |
+					  ((uint64_t)data[offset + 1] << 8) |
+					  ((uint64_t)data[offset + 2] << 16) |
+					  ((uint64_t)data[offset + 3] << 24) |
+					  ((uint64_t)data[offset + 4] << 32) |
+					  ((uint64_t)data[offset + 5] << 40) |
+					  ((uint64_t)data[offset + 6] << 48) |
+					  ((uint64_t)data[offset + 7] << 56);
+	offset += 8;
+	return result;
 }
 
 void MeshtasticDecoderStandalone::calculateSkipAndRouting(DecodedPacket& packet)
@@ -990,9 +2629,120 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 				 << ",\n";
 			json << "    \"longitude\": " << formatDouble(packet.longitude)
 				 << ",\n";
-			json << "    \"altitude\": " << packet.altitude << ",\n";
-			json << "    \"timestamp\": " << packet.timestamp << "\n";
-			json << "  },\n";
+			json << "    \"altitude\": " << packet.altitude;
+			
+			// Build list of optional fields to include
+			if (packet.timestamp > 0)
+			{
+				json << ",\n    \"timestamp\": " << packet.timestamp;
+			}
+			
+			if (packet.sats_in_view > 0)
+			{
+				json << ",\n    \"sats_in_view\": " << packet.sats_in_view;
+			}
+			
+			if (packet.sats_in_use > 0)
+			{
+				json << ",\n    \"sats_in_use\": " << packet.sats_in_use;
+			}
+			
+			if (packet.ground_speed > 0)
+			{
+				json << ",\n    \"ground_speed\": " << packet.ground_speed << ",\n    \"ground_speed_unit\": \"m/s\"";
+			}
+			
+			if (packet.ground_track >= 0.0 && packet.ground_track <= 360.0)
+			{
+				json << ",\n    \"ground_track\": " << formatDouble(packet.ground_track) << ",\n    \"ground_track_unit\": \"degrees\"";
+			}
+			
+			if (packet.gps_accuracy > 0)
+			{
+				json << ",\n    \"gps_accuracy\": " << packet.gps_accuracy << ",\n    \"gps_accuracy_unit\": \"mm\"";
+			}
+			
+			if (packet.pdop > 0.0)
+			{
+				json << ",\n    \"pdop\": " << formatDouble(packet.pdop);
+			}
+			
+			if (packet.hdop > 0.0)
+			{
+				json << ",\n    \"hdop\": " << formatDouble(packet.hdop);
+			}
+			
+			if (packet.vdop > 0.0)
+			{
+				json << ",\n    \"vdop\": " << formatDouble(packet.vdop);
+			}
+			
+			if (packet.fix_quality > 0)
+			{
+				json << ",\n    \"fix_quality\": " << packet.fix_quality;
+			}
+			
+			if (packet.fix_type > 0)
+			{
+				json << ",\n    \"fix_type\": " << packet.fix_type;
+			}
+			
+			if (packet.precision_bits > 0)
+			{
+				json << ",\n    \"precision_bits\": " << packet.precision_bits;
+			}
+			
+			if (packet.altitude_hae != 0)
+			{
+				json << ",\n    \"altitude_hae\": " << packet.altitude_hae << ",\n    \"altitude_hae_unit\": \"meters\"";
+			}
+			
+			if (packet.altitude_geoidal_separation != 0)
+			{
+				json << ",\n    \"altitude_geoidal_separation\": " << packet.altitude_geoidal_separation << ",\n    \"altitude_geoidal_separation_unit\": \"meters\"";
+			}
+			
+			if (packet.location_source > 0)
+			{
+				const char* loc_sources[] = {"UNSET", "MANUAL", "INTERNAL", "EXTERNAL"};
+				json << ",\n    \"location_source\": " << packet.location_source;
+				if (packet.location_source < 4)
+				{
+					json << ",\n    \"location_source_name\": \"" << loc_sources[packet.location_source] << "\"";
+				}
+			}
+			
+			if (packet.altitude_source > 0)
+			{
+				const char* alt_sources[] = {"UNSET", "MANUAL", "INTERNAL", "EXTERNAL", "BAROMETRIC"};
+				json << ",\n    \"altitude_source\": " << packet.altitude_source;
+				if (packet.altitude_source < 5)
+				{
+					json << ",\n    \"altitude_source_name\": \"" << alt_sources[packet.altitude_source] << "\"";
+				}
+			}
+			
+			if (packet.timestamp_millis_adjust != 0)
+			{
+				json << ",\n    \"timestamp_millis_adjust\": " << packet.timestamp_millis_adjust;
+			}
+			
+			if (packet.sensor_id > 0)
+			{
+				json << ",\n    \"sensor_id\": " << packet.sensor_id;
+			}
+			
+			if (packet.next_update > 0)
+			{
+				json << ",\n    \"next_update\": " << packet.next_update << ",\n    \"next_update_unit\": \"seconds\"";
+			}
+			
+			if (packet.seq_number > 0)
+			{
+				json << ",\n    \"seq_number\": " << packet.seq_number;
+			}
+			
+			json << "\n  },\n";
 			json << "  \"google_maps_url\": \"https://www.google.com/maps?q="
 				 << packet.latitude << "," << packet.longitude << "\",\n";
 		}
@@ -1066,15 +2816,264 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 		else if (packet.port == 67)
 		{ // TELEMETRY_APP
 			json << "  \"telemetry\": {\n";
-			json << "    \"info\": \"" << escapeJsonString(packet.telemetry_info) << "\",\n";
-			json << "    \"raw_hex\": \"" << escapeJsonString(packet.raw_telemetry_hex) << "\"\n";
-			json << "  },\n";
+			json << "    \"type\": \"" << escapeJsonString(packet.telemetry_type) << "\",\n";
+			if (packet.telemetry_time > 0)
+			{
+				json << "    \"time\": " << packet.telemetry_time << ",\n";
+			}
+			
+			if (packet.telemetry_type == "device_metrics")
+			{
+				bool first = true;
+				// Always include battery_level (can be 0-100, or >100 for powered)
+				if (!first) json << ",\n";
+				json << "    \"battery_level\": " << packet.battery_level;
+				first = false;
+				if (packet.voltage != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"voltage\": " << std::fixed << std::setprecision(2) << packet.voltage;
+					first = false;
+				}
+				if (packet.channel_utilization != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"channel_utilization\": " << std::fixed << std::setprecision(2) << packet.channel_utilization;
+					first = false;
+				}
+				if (packet.air_util_tx != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"air_util_tx\": " << std::fixed << std::setprecision(2) << packet.air_util_tx;
+					first = false;
+				}
+				if (packet.uptime_seconds > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"uptime_seconds\": " << packet.uptime_seconds;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "environment_metrics")
+			{
+				bool first = true;
+				if (packet.temperature != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"temperature\": " << std::fixed << std::setprecision(2) << packet.temperature;
+					first = false;
+				}
+				if (packet.relative_humidity != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"relative_humidity\": " << std::fixed << std::setprecision(2) << packet.relative_humidity;
+					first = false;
+				}
+				if (packet.barometric_pressure != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"barometric_pressure\": " << std::fixed << std::setprecision(2) << packet.barometric_pressure;
+					first = false;
+				}
+				if (packet.gas_resistance != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"gas_resistance\": " << std::fixed << std::setprecision(2) << packet.gas_resistance;
+					first = false;
+				}
+				if (packet.voltage != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"voltage\": " << std::fixed << std::setprecision(2) << packet.voltage;
+					first = false;
+				}
+				if (packet.current != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"current\": " << std::fixed << std::setprecision(2) << packet.current;
+					first = false;
+				}
+				if (packet.iaq > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"iaq\": " << packet.iaq;
+					first = false;
+				}
+				if (packet.distance != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"distance\": " << std::fixed << std::setprecision(2) << packet.distance;
+					first = false;
+				}
+				if (packet.lux != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"lux\": " << std::fixed << std::setprecision(2) << packet.lux;
+					first = false;
+				}
+				if (packet.wind_speed != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"wind_speed\": " << std::fixed << std::setprecision(2) << packet.wind_speed;
+					first = false;
+				}
+				if (packet.wind_direction > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"wind_direction\": " << packet.wind_direction;
+					first = false;
+				}
+				if (packet.soil_moisture > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"soil_moisture\": " << packet.soil_moisture;
+					first = false;
+				}
+				if (packet.soil_temperature != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"soil_temperature\": " << std::fixed << std::setprecision(2) << packet.soil_temperature;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "air_quality_metrics")
+			{
+				bool first = true;
+				if (packet.pm10_standard > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"pm10_standard\": " << packet.pm10_standard;
+					first = false;
+				}
+				if (packet.pm25_standard > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"pm25_standard\": " << packet.pm25_standard;
+					first = false;
+				}
+				if (packet.pm100_standard > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"pm100_standard\": " << packet.pm100_standard;
+					first = false;
+				}
+				if (packet.co2 > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"co2\": " << packet.co2;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "power_metrics")
+			{
+				bool first = true;
+				if (packet.ch1_voltage != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"ch1_voltage\": " << std::fixed << std::setprecision(2) << packet.ch1_voltage;
+					first = false;
+				}
+				if (packet.ch1_current != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"ch1_current\": " << std::fixed << std::setprecision(2) << packet.ch1_current;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "local_stats")
+			{
+				bool first = true;
+				if (packet.uptime_seconds > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"uptime_seconds\": " << packet.uptime_seconds;
+					first = false;
+				}
+				if (packet.channel_utilization != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"channel_utilization\": " << std::fixed << std::setprecision(2) << packet.channel_utilization;
+					first = false;
+				}
+				if (packet.num_packets_tx > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"num_packets_tx\": " << packet.num_packets_tx;
+					first = false;
+				}
+				if (packet.num_packets_rx > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"num_packets_rx\": " << packet.num_packets_rx;
+					first = false;
+				}
+				if (packet.num_online_nodes > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"num_online_nodes\": " << packet.num_online_nodes;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "health_metrics")
+			{
+				bool first = true;
+				if (packet.heart_bpm > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"heart_bpm\": " << packet.heart_bpm;
+					first = false;
+				}
+				if (packet.spO2 > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"spO2\": " << packet.spO2;
+					first = false;
+				}
+				if (packet.body_temperature != 0.0f)
+				{
+					if (!first) json << ",\n";
+					json << "    \"body_temperature\": " << std::fixed << std::setprecision(2) << packet.body_temperature;
+					first = false;
+				}
+			}
+			else if (packet.telemetry_type == "host_metrics")
+			{
+				bool first = true;
+				if (packet.uptime_seconds > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"uptime_seconds\": " << packet.uptime_seconds;
+					first = false;
+				}
+				if (packet.freemem_bytes > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"freemem_bytes\": " << packet.freemem_bytes;
+					first = false;
+				}
+				if (packet.diskfree1_bytes > 0)
+				{
+					if (!first) json << ",\n";
+					json << "    \"diskfree1_bytes\": " << packet.diskfree1_bytes;
+					first = false;
+				}
+			}
+			
+			json << "\n  },\n";
+			json << "  \"telemetry_raw_hex\": \"" << escapeJsonString(packet.raw_telemetry_hex) << "\",\n";
 		}
 		else if (packet.port == 70)
 		{ // TRACEROUTE_APP
 			json << "  \"traceroute\": {\n";
+			if (!packet.route_type.empty())
+			{
+				json << "    \"route_type\": \"" << escapeJsonString(packet.route_type) << "\",\n";
+			}
 			json << "    \"route_count\": " << packet.route_count << ",\n";
-			json << "    \"route_path\": \"" << escapeJsonString(packet.route_path) << "\",\n";
+			if (!packet.route_path.empty())
+			{
+				json << "    \"route_path\": \"" << escapeJsonString(packet.route_path) << "\",\n";
+			}
 			json << "    \"route_nodes\": [";
 			for (size_t i = 0; i < packet.route_nodes.size(); ++i)
 			{
@@ -1082,7 +3081,57 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 					json << ", ";
 				json << "\"0x" << std::hex << std::setfill('0') << std::setw(8) << packet.route_nodes[i] << "\"";
 			}
-			json << "]\n  },\n";
+			json << "]";
+			
+			if (!packet.snr_towards.empty())
+			{
+				json << ",\n    \"snr_towards\": [";
+				for (size_t i = 0; i < packet.snr_towards.size(); ++i)
+				{
+					if (i > 0)
+						json << ", ";
+					// SNR values are in dB, scaled by 4 (divide by 4 to get actual dB)
+					double snr_dB = packet.snr_towards[i] / 4.0;
+					json << std::fixed << std::setprecision(2) << snr_dB;
+				}
+				json << "],\n    \"snr_towards_unit\": \"dB\"";
+			}
+			
+			if (packet.route_back_count > 0)
+			{
+				json << ",\n    \"route_back_count\": " << packet.route_back_count;
+			}
+			if (!packet.route_back_path.empty())
+			{
+				json << ",\n    \"route_back_path\": \"" << escapeJsonString(packet.route_back_path) << "\"";
+			}
+			if (!packet.route_back_nodes.empty())
+			{
+				json << ",\n    \"route_back_nodes\": [";
+				for (size_t i = 0; i < packet.route_back_nodes.size(); ++i)
+				{
+					if (i > 0)
+						json << ", ";
+					json << "\"0x" << std::hex << std::setfill('0') << std::setw(8) << packet.route_back_nodes[i] << "\"";
+				}
+				json << "]";
+			}
+			
+			if (!packet.snr_back.empty())
+			{
+				json << ",\n    \"snr_back\": [";
+				for (size_t i = 0; i < packet.snr_back.size(); ++i)
+				{
+					if (i > 0)
+						json << ", ";
+					// SNR values are in dB, scaled by 4 (divide by 4 to get actual dB)
+					double snr_dB = packet.snr_back[i] / 4.0;
+					json << std::fixed << std::setprecision(2) << snr_dB;
+				}
+				json << "],\n    \"snr_back_unit\": \"dB\"";
+			}
+			
+			json << "\n  },\n";
 		}
 
 		json << "  \"decrypted_payload\": \""

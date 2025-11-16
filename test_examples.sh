@@ -91,11 +91,30 @@ echo "Result:"
 ./build/meshtastic_decoder_standalone "FF FF FF FF 98 E2 09 13 63 47 1F 74 A5 08 00 98 56 F7 03 F4 CE 26 9A C0 72 BC D0 B4 63 89 27 72 BF AB AE CB 7B A1 38 13 CF A2 62 93 2A 73 52 18 CC" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
 echo
 
+echo "Testing TELEMETRY_APP (Port 67) - Environment metrics example..."
+echo "Expected: Environment telemetry data (temperature, etc.)"
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 00 FB E7 1D F2 54 D2 2A 62 55 00 24 FA 38 3C 25 35 30 C9 9F A0 74 1D 4B 7B E9 92 94 AD 0B 5A 74 51 6B 42 FC 31 3C D9 A3 35 AF 3C AC E9 81\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 00 FB E7 1D F2 54 D2 2A 62 55 00 24 FA 38 3C 25 35 30 C9 9F A0 74 1D 4B 7B E9 92 94 AD 0B 5A 74 51 6B 42 FC 31 3C D9 A3 35 AF 3C AC E9 81" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
 echo "Testing POSITION_APP (Port 3) - Recent GPS data..."
 echo "Expected: GPS coordinates 61.4924288°N, 23.8616576°E with altitude 104m"
 echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 98 E2 09 13 62 FF 8E DE A5 08 00 98 56 5C B0 21 CD B6 71 28 1B 67 5C 14 6C 31 5D 0D 26 B7 EA 2D CD FA 81 AC 2F 90 06 07 19 E7 AA C9 B0 34 C6 22\""
 echo "Result:"
 ./build/meshtastic_decoder_standalone "FF FF FF FF 98 E2 09 13 62 FF 8E DE A5 08 00 98 56 5C B0 21 CD B6 71 28 1B 67 5C 14 6C 31 5D 0D 26 B7 EA 2D CD FA 81 AC 2F 90 06 07 19 E7 AA C9 B0 34 C6 22" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Testing POSITION_APP (Port 3) - Additional position test 1..."
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 08 8D D1 69 9E 7D 4E F8 E0 55 00 24 74 CF 8B 2C 38 90 B0 15 C3 67 29 81 B8 58 03 E1 26 17 20 97 D2 43 D1 12 85 D0 80 C7 9D 07 CF 53 EB EF 60 63 5E 77 BF 14 F9 92\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 08 8D D1 69 9E 7D 4E F8 E0 55 00 24 74 CF 8B 2C 38 90 B0 15 C3 67 29 81 B8 58 03 E1 26 17 20 97 D2 43 D1 12 85 D0 80 C7 9D 07 CF 53 EB EF 60 63 5E 77 BF 14 F9 92" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
+echo
+
+echo "Testing POSITION_APP (Port 3) - Additional position test 2..."
+echo "Command: ./build/meshtastic_decoder_standalone \"FF FF FF FF 28 9E 81 EE 79 9C 44 51 C5 55 00 24 49 D7 37 09 C3 8C 23 B9 F0 78 15 D7 39 07 AC 43 DF 11 C3 98 05 17 32 2A BC 52 58 7A B0 7D B2 64 E4 BB 6C 89 0C 6D 3D 11 81 DC\""
+echo "Result:"
+./build/meshtastic_decoder_standalone "FF FF FF FF 28 9E 81 EE 79 9C 44 51 C5 55 00 24 49 D7 37 09 C3 8C 23 B9 F0 78 15 D7 39 07 AC 43 DF 11 C3 98 05 17 32 2A BC 52 58 7A B0 7D B2 64 E4 BB 6C 89 0C 6D 3D 11 81 DC" | jq '.' 2>/dev/null || echo "jq not available, raw output above"
 echo
 
 echo "=== Test Complete ==="
