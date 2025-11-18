@@ -46,8 +46,12 @@ class MeshtasticDecoderStandalone
 		uint32_t precision_bits;
 		int32_t altitude_hae; // HAE altitude in meters
 		int32_t altitude_geoidal_separation; // Geoidal separation in meters
-		uint32_t location_source; // enum: 0=UNSET, 1=MANUAL, 2=INTERNAL, 3=EXTERNAL
-		uint32_t altitude_source; // enum: 0=UNSET, 1=MANUAL, 2=INTERNAL, 3=EXTERNAL, 4=BAROMETRIC
+		uint32_t location_source; // enum LocationSource: 0=LOC_UNSET, 1=LOC_MANUAL, 2=LOC_INTERNAL, 3=LOC_EXTERNAL
+		// Reference: Meshtastic mesh.proto LocationSource enum
+		// If value >= 4, it's an unknown/unrecognized enum value (protobuf forward compatibility)
+		uint32_t altitude_source; // enum AltitudeSource: 0=ALT_UNSET, 1=ALT_MANUAL, 2=ALT_INTERNAL, 3=ALT_EXTERNAL, 4=ALT_BAROMETRIC
+		// Reference: Meshtastic mesh.proto AltitudeSource enum
+		// If value >= 5, it's an unknown/unrecognized enum value (protobuf forward compatibility)
 		int32_t timestamp_millis_adjust;
 		uint32_t sensor_id;
 		uint32_t next_update; // seconds until next update
@@ -2702,6 +2706,9 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 				json << ",\n    \"altitude_geoidal_separation\": " << packet.altitude_geoidal_separation << ",\n    \"altitude_geoidal_separation_unit\": \"meters\"";
 			}
 			
+			// LocationSource enum: 0=LOC_UNSET, 1=LOC_MANUAL, 2=LOC_INTERNAL, 3=LOC_EXTERNAL
+			// Values >= 4 are unknown (protobuf forward compatibility - future enum values)
+			// Note: Value 0 (UNSET) is the default and typically not shown when unset
 			if (packet.location_source > 0)
 			{
 				const char* loc_sources[] = {"UNSET", "MANUAL", "INTERNAL", "EXTERNAL"};
@@ -2710,8 +2717,17 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 				{
 					json << ",\n    \"location_source_name\": \"" << loc_sources[packet.location_source] << "\"";
 				}
+				else
+				{
+					// Unknown enum value (>= 4) - could be a future Meshtastic enum value
+					// or corrupted data. Protobuf preserves unknown enum values for forward compatibility.
+					json << ",\n    \"location_source_name\": \"UNKNOWN\"";
+				}
 			}
 			
+			// AltitudeSource enum: 0=ALT_UNSET, 1=ALT_MANUAL, 2=ALT_INTERNAL, 3=ALT_EXTERNAL, 4=ALT_BAROMETRIC
+			// Values >= 5 are unknown (protobuf forward compatibility - future enum values)
+			// Note: Value 0 (UNSET) is the default and typically not shown when unset
 			if (packet.altitude_source > 0)
 			{
 				const char* alt_sources[] = {"UNSET", "MANUAL", "INTERNAL", "EXTERNAL", "BAROMETRIC"};
@@ -2719,6 +2735,12 @@ std::string MeshtasticDecoderStandalone::toJson(const DecodedPacket& packet)
 				if (packet.altitude_source < 5)
 				{
 					json << ",\n    \"altitude_source_name\": \"" << alt_sources[packet.altitude_source] << "\"";
+				}
+				else
+				{
+					// Unknown enum value (>= 5) - could be a future Meshtastic enum value
+					// or corrupted data. Protobuf preserves unknown enum values for forward compatibility.
+					json << ",\n    \"altitude_source_name\": \"UNKNOWN\"";
 				}
 			}
 			
