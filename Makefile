@@ -5,7 +5,7 @@ BUILD_DIR = build
 SOURCE_DIR = .
 
 # Source files for library
-LIBRARY_SOURCES = meshtastic_decoder.cpp aes_barebones.cpp
+LIBRARY_SOURCES = meshtastic_decoder.cpp meshtastic_encoder.cpp aes_barebones.cpp
 LIBRARY_OBJECTS = $(addprefix $(BUILD_DIR)/,$(LIBRARY_SOURCES:.cpp=.o))
 LIBRARY_TARGET = $(BUILD_DIR)/libmeshtastic_decoder.a
 
@@ -14,8 +14,13 @@ STANDALONE_SOURCES = meshtastic_decoder_standalone.cpp
 STANDALONE_OBJECTS = $(addprefix $(BUILD_DIR)/,$(STANDALONE_SOURCES:.cpp=.o))
 STANDALONE_TARGET = $(BUILD_DIR)/meshtastic_decoder_standalone
 
+# Source files for encoder test
+TEST_ENCODER_SOURCES = test_encoder.cpp
+TEST_ENCODER_OBJECTS = $(addprefix $(BUILD_DIR)/,$(TEST_ENCODER_SOURCES:.cpp=.o))
+TEST_ENCODER_TARGET = $(BUILD_DIR)/test_encoder
+
 # Default target: build both library and standalone
-all: $(BUILD_DIR) $(LIBRARY_TARGET) $(STANDALONE_TARGET)
+all: $(BUILD_DIR) $(LIBRARY_TARGET) $(STANDALONE_TARGET) $(TEST_ENCODER_TARGET)
 
 # Create build directory
 $(BUILD_DIR):
@@ -29,6 +34,10 @@ $(LIBRARY_TARGET): $(LIBRARY_OBJECTS)
 $(STANDALONE_TARGET): $(STANDALONE_OBJECTS) $(LIBRARY_TARGET)
 	$(CXX) $(STANDALONE_OBJECTS) -L$(BUILD_DIR) -lmeshtastic_decoder -o $(STANDALONE_TARGET)
 
+# Build the encoder test (links against library)
+$(TEST_ENCODER_TARGET): $(BUILD_DIR) $(TEST_ENCODER_OBJECTS) $(LIBRARY_TARGET)
+	$(CXX) $(TEST_ENCODER_OBJECTS) -L$(BUILD_DIR) -lmeshtastic_decoder -o $(TEST_ENCODER_TARGET)
+
 # Compile source files
 $(BUILD_DIR)/%.o: $(SOURCE_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -40,6 +49,10 @@ clean:
 # Run the test examples
 test: $(STANDALONE_TARGET)
 	./test_examples.sh
+
+# Run the encoder test
+test-encoder: $(TEST_ENCODER_TARGET)
+	$(TEST_ENCODER_TARGET)
 
 # Test individual packet types
 test-text: $(STANDALONE_TARGET)
