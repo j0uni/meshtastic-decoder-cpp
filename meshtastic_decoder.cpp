@@ -1052,6 +1052,12 @@ bool MeshtasticDecoder::decodeNodeInfo(
 								case 23:
 									packet.hw_model = "HELTEC_HRU_3601";
 									break;
+								case 24:
+									packet.hw_model = "T_DECK";
+									break;
+								case 25:
+									packet.hw_model = "T_PAGER";
+									break;
 								default:
 									packet.hw_model =
 									  "UNKNOWN_" + std::to_string(hw_model);

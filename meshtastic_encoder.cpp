@@ -3,6 +3,11 @@
 #include <cstring>
 #include <random>
 
+#ifdef ARDUINO
+#include <esp_random.h>
+#include <Arduino.h>  // For millis() and analogRead()
+#endif
+
 const std::vector<uint8_t> MeshtasticEncoder::DEFAULT_PSK = {
 	0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
 	0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01
@@ -138,17 +143,61 @@ std::vector<uint8_t> MeshtasticEncoder::buildNonce(uint32_t packet_id, uint32_t 
 
 uint32_t MeshtasticEncoder::generatePacketId()
 {
-	// Use std::random_device for better randomness
+	uint32_t id = 0;
+	
+#ifdef ARDUINO
+	// ESP32: Use hardware random number generator combined with multiple entropy sources
+	// 1. esp_random() - hardware RNG
+	// 2. millis() - time since boot (varies each boot)
+	// 3. ADC noise - read from floating analog pin for additional entropy
+	uint32_t r1 = esp_random();
+	uint32_t r2 = esp_random();
+	uint32_t r3 = esp_random();
+	uint32_t time_entropy = (uint32_t)millis();  // Time since boot (varies each boot)
+	
+	// Read ADC noise for additional entropy
+	// Even reading from a connected pin (like battery) multiple times gives
+	// slight variations due to ADC noise, temperature, power supply ripple, etc.
+	// We read multiple times with delays to capture these variations
+	uint32_t adc_noise = 0;
+	for (int i = 0; i < 8; i++) {
+		// Read from battery pin (GPIO1) - even if connected, ADC has noise
+		// Multiple reads with delays capture temperature/power variations
+		uint16_t adc_val = analogRead(1);  // Read ADC channel 1 (GPIO1 - battery)
+		adc_noise ^= ((uint32_t)adc_val << ((i % 4) * 8)) | ((uint32_t)adc_val >> (24 - (i % 4) * 8));
+		// Small delay to let ADC settle and capture different noise samples
+		delayMicroseconds(5);
+	}
+	
+	// Debug output to verify randomness
+	Serial.printf("[PacketID] r1=0x%08X r2=0x%08X r3=0x%08X millis=%lu adc=0x%08X\n", 
+	              r1, r2, r3, (unsigned long)time_entropy, adc_noise);
+	
+	// Combine all entropy sources with XOR and bit rotations
+	id = r1;
+	id ^= (r2 << 16) | (r2 >> 16);  // Rotate r2
+	id ^= r3;
+	id ^= time_entropy;
+	id ^= (time_entropy << 16) | (time_entropy >> 16);  // Rotate time_entropy
+	id ^= adc_noise;
+	id ^= (adc_noise << 8) | (adc_noise >> 24);  // Rotate ADC noise
+	
+	// Final mixing with another random value
+	id ^= esp_random();
+#else
+	// macOS/other: Use std::random_device for randomness
 	static std::random_device rd;
 	static std::mt19937 gen(rd());
 	static std::uniform_int_distribution<uint32_t> dis(1, 0xFFFFFFFF);
-	
-	uint32_t id = dis(gen);
+	id = dis(gen);
+#endif
 	
 	// Ensure non-zero
 	if (id == 0)
 	{
-		id = 1;
+		// If still zero, use a combination of time and a constant
+		id = (uint32_t)(millis() ^ 0x12345678);
+		if (id == 0) id = 1;
 	}
 	
 	return id;
@@ -225,7 +274,11 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeTextMessage(
 	}
 	
 	// Build header
-	uint8_t flags = 0;
+	// Flags byte encoding (from Meshtastic protocol):
+	// Bits 0-2: current hop_limit (remaining hops)
+	// Bits 5-7: hop_start (original hop limit)
+	// For a new packet: hop_limit = hop_start = msg.hop_limit
+	uint8_t flags = (msg.hop_limit & 0x07) | ((msg.hop_limit & 0x07) << 5);
 	uint8_t next_hop = 0;
 	uint8_t relay_node = 0;
 	std::vector<uint8_t> header = buildHeader(msg.to_address,
@@ -328,7 +381,11 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeNodeInfo(
 	}
 	
 	// Build header
-	uint8_t flags = 0;
+	// Flags byte encoding (from Meshtastic protocol):
+	// Bits 0-2: current hop_limit (remaining hops)
+	// Bits 5-7: hop_start (original hop limit)
+	// For a new packet: hop_limit = hop_start = nodeinfo.hop_limit
+	uint8_t flags = (nodeinfo.hop_limit & 0x07) | ((nodeinfo.hop_limit & 0x07) << 5);
 	uint8_t next_hop = 0;
 	uint8_t relay_node = 0;
 	std::vector<uint8_t> header = buildHeader(0xFFFFFFFF,  // Broadcast
@@ -459,7 +516,11 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodePosition(
 	}
 	
 	// Build header
-	uint8_t flags = 0;
+	// Flags byte encoding (from Meshtastic protocol):
+	// Bits 0-2: current hop_limit (remaining hops)
+	// Bits 5-7: hop_start (original hop limit)
+	// For a new packet: hop_limit = hop_start = position.hop_limit
+	uint8_t flags = (position.hop_limit & 0x07) | ((position.hop_limit & 0x07) << 5);
 	uint8_t next_hop = 0;
 	uint8_t relay_node = 0;
 	std::vector<uint8_t> header = buildHeader(0xFFFFFFFF,  // Broadcast
