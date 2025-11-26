@@ -30,6 +30,7 @@ class MeshtasticDecoder
 	{
 		bool success;
 		std::string error_message;
+		std::string debug_info;  // Debug information for troubleshooting
 
 		// Header information
 		uint32_t to_address;
@@ -83,6 +84,11 @@ class MeshtasticDecoder
 		std::string text_message;
 		std::string from_node;
 		std::string to_node;
+		
+		// Data message fields (common to all app types)
+		uint32_t request_id; // Field 7: packet_id of message being replied to (0 if not a reply)
+		uint32_t reply_id;   // Field 8: reply_id field (if present)
+		bool want_response;  // Field 9: want_response flag (if present)
 
 		// Traceroute data (for TRACEROUTE_APP)
 		std::vector<uint32_t> route_nodes;
@@ -255,6 +261,7 @@ class MeshtasticDecoder
 	// Protobuf decoding
 	bool decodeProtobuf(const std::vector<uint8_t>& data, DecodedPacket& packet);
 	void decodeMeshPacketFields(const std::vector<uint8_t>& data, DecodedPacket& packet);
+	void decodeDataMessageFields(const std::vector<uint8_t>& data, DecodedPacket& packet);
 	bool decodeTextMessage(const std::vector<uint8_t>& data, DecodedPacket& packet);
 	bool decodeNodeInfo(const std::vector<uint8_t>& data, DecodedPacket& packet);
 	bool decodeTelemetry(const std::vector<uint8_t>& data, DecodedPacket& packet);

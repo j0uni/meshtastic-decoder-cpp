@@ -34,6 +34,9 @@ class MeshtasticEncoder
 		uint32_t to_address;        // Destination node ID (0xFFFFFFFF for broadcast)
 		uint8_t channel;            // Channel index (0 for default)
 		uint8_t hop_limit;          // Maximum hops (default: 3)
+		uint32_t request_id;       // Packet ID of message being replied to (0 if not a reply)
+		uint32_t reply_id;         // Reply ID field (0 if not set)
+		bool want_response;        // Want response flag (default: false)
 	};
 
 	/**
@@ -86,22 +89,26 @@ class MeshtasticEncoder
 	 * Encode a text message packet
 	 * @param msg Text message structure
 	 * @param from_address Source node ID
+	 * @param channel_name Channel name for hash calculation (if empty, uses msg.channel as hash)
 	 * @param psk Optional PSK (16 bytes). If empty, uses default PSK
 	 * @return EncodedPacket with complete packet bytes
 	 */
 	EncodedPacket encodeTextMessage(const TextMessage& msg,
 									uint32_t from_address,
+									const std::string& channel_name = "",
 									const std::vector<uint8_t>& psk = {});
 
 	/**
 	 * Encode a node info packet
 	 * @param nodeinfo Node info structure
 	 * @param from_address Source node ID (should match nodeinfo.node_id)
+	 * @param channel_name Channel name for hash calculation (if empty, uses default channel)
 	 * @param psk Optional PSK (16 bytes). If empty, uses default PSK
 	 * @return EncodedPacket with complete packet bytes
 	 */
 	EncodedPacket encodeNodeInfo(const NodeInfo& nodeinfo,
 								 uint32_t from_address,
+								 const std::string& channel_name = "",
 								 const std::vector<uint8_t>& psk = {});
 
 	/**
@@ -114,6 +121,15 @@ class MeshtasticEncoder
 	EncodedPacket encodePosition(const Position& position,
 								 uint32_t from_address,
 								 const std::vector<uint8_t>& psk = {});
+
+	/**
+	 * Calculate channel hash from channel name and PSK
+	 * @param channel_name Channel name string
+	 * @param psk Optional PSK (16 bytes). If empty, uses default PSK
+	 * @return Channel hash byte
+	 */
+	static uint8_t calculateChannelHash(const std::string& channel_name,
+										const std::vector<uint8_t>& psk = {});
 
   private:
 	// Default PSK (same as decoder)
@@ -152,6 +168,9 @@ class MeshtasticEncoder
 					   uint32_t packet_id,
 					   uint32_t from_address,
 					   const std::vector<uint8_t>& psk);
+
+	// Channel hash calculation
+	static uint8_t xorHash(const uint8_t* data, size_t len);
 };
 
 #endif // MESHTASTIC_ENCODER_H

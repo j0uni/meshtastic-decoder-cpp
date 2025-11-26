@@ -2,6 +2,7 @@
 #include "meshtastic_decoder.h"
 #include <iostream>
 #include <iomanip>
+#include <cstring>
 
 void printHex(const std::vector<uint8_t>& data, const std::string& label)
 {

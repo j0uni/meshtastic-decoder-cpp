@@ -17,6 +17,8 @@ MeshtasticDecoder::decodePacket(const std::vector<uint8_t>& raw_data)
 {
 	DecodedPacket result;
 	result.success = false;
+	result.error_message = "";
+	result.debug_info = "";
 
 	// Initialize default values
 	result.to_address = 0;
@@ -150,6 +152,9 @@ MeshtasticDecoder::decodePacket(const std::vector<uint8_t>& raw_data)
 	result.load5 = 0;
 	result.load15 = 0;
 	result.host_user_string = "";
+	result.request_id = 0;
+	result.reply_id = 0;
+	result.want_response = false;
 
 	// Parse header
 	if (!parseHeader(raw_data, result))
@@ -171,17 +176,41 @@ MeshtasticDecoder::decodePacket(const std::vector<uint8_t>& raw_data)
 	std::vector<uint8_t> encrypted_payload(raw_data.begin() + 16,
 										   raw_data.end());
 
-	// Check if payload is already unencrypted (starts with 0x08 = protobuf field 1 tag)
-	// Unencrypted packets have the protobuf data directly in the payload
+	// Check if payload is already unencrypted
+	// Unencrypted packets have protobuf data directly in the payload
+	// They MUST start with:
+	// - 0x08 (field 1 tag for portnum, wire type 0 = varint)
+	// - 0x12 (field 2 tag for payload, wire type 2 = length-delimited)
+	// 
+	// NOTE: We cannot use a generic "looks like protobuf" check because encrypted
+	// data can randomly look like valid protobuf tags, causing false positives.
+	// We must be strict and only accept known-good patterns.
 	std::vector<uint8_t> decrypted_payload;
-	if (encrypted_payload.size() > 0 && encrypted_payload[0] == 0x08)
-	{
-		// Payload is already unencrypted - use it directly
-		decrypted_payload = encrypted_payload;
+	bool is_unencrypted = false;
+	
+	if (encrypted_payload.size() > 0) {
+		uint8_t first_byte = encrypted_payload[0];
+		
+		// Only accept if it explicitly starts with known Data message fields
+		// Field 1 (portnum): 0x08 (field 1, wire type 0)
+		// Field 2 (payload): 0x12 (field 2, wire type 2)
+		// However, 0x12 alone is not definitive - encrypted data can also start with 0x12
+		// So we'll try unencrypted first, but fall back to decryption if parsing fails
+		if (first_byte == 0x08) {
+			// Definitely looks like unencrypted (starts with port field)
+			is_unencrypted = true;
+			decrypted_payload = encrypted_payload;
+		} else if (first_byte == 0x12) {
+			// Might be unencrypted (starts with payload field), but could also be encrypted
+			// Try as unencrypted first, but we'll validate and fall back to decryption if needed
+			is_unencrypted = true;
+			decrypted_payload = encrypted_payload;
+		}
+		// Otherwise, assume it's encrypted and decrypt it
 	}
-	else
-	{
-		// Decrypt payload
+	
+	if (!is_unencrypted) {
+		// Try to decrypt payload
 		if (!decryptPayload(encrypted_payload, result, decrypted_payload))
 		{
 			result.error_message = "Failed to decrypt payload";
@@ -198,66 +227,388 @@ MeshtasticDecoder::decodePacket(const std::vector<uint8_t>& raw_data)
 	result.key_used = "1PG7OiApB1nwvP+rz05pAQ==";
 
 	// Parse protobuf
-	if (decrypted_payload.size() < 2)
+	if (decrypted_payload.size() < 1)
 	{
 		result.error_message = "Decrypted payload too short";
 		return result;
 	}
-
-	// Verify decryption was successful by checking if payload starts with expected structure
-	// Valid Meshtastic packets should start with 0x08 (field 1 tag for portnum) or have it somewhere in the first few bytes
-	// If decryption failed, the payload will be garbage and won't have this structure
-	bool has_valid_structure = false;
-	if (decrypted_payload.size() > 0 && decrypted_payload[0] == 0x08) {
-		has_valid_structure = true;
-	} else {
-		// Scan first 16 bytes for the 0x08 tag (field 1 tag)
-		for (size_t i = 0; i < decrypted_payload.size() && i < 16; i++) {
-			if (decrypted_payload[i] == 0x08) {
-				has_valid_structure = true;
-				break;
-			}
-		}
-	}
 	
-	if (!has_valid_structure) {
-		result.error_message = "Decryption failed - payload doesn't have valid protobuf structure (missing field 1 tag 0x08)";
-		return result;
+	// Debug: Check if payload looks like valid protobuf
+	// Valid protobuf tags are: 0x08 (field 1), 0x0A (field 1, length-delimited), 0x10 (field 2), 0x12 (field 2, length-delimited), etc.
+	// Check for any valid protobuf field tags in the first few bytes
+	bool has_protobuf_tag = false;
+	for (size_t i = 0; i < decrypted_payload.size() && i < 32; i++) {
+		uint8_t byte = decrypted_payload[i];
+		uint8_t field_num = byte >> 3;
+		uint8_t wire_type = byte & 0x07;
+		// Valid protobuf tags have field_num 1-15 and wire_type 0-5
+		if (field_num >= 1 && field_num <= 15 && wire_type <= 5) {
+			has_protobuf_tag = true;
+			break;
+		}
 	}
 
 	// Extract port number and set app name
 	// The Data protobuf message structure:
 	// Field 1 (portnum): tag byte 0x08 (field 1, wire type 0 = varint), then port value as varint
 	// Field 2 (payload): tag byte 0x12 (field 2, wire type 2 = length-delimited), then length, then data
+	// Other fields may come before field 1, so we need to scan the entire payload
 	// So we need to parse the port as a varint, not read it directly
 	size_t offset = 0;
-	if (decrypted_payload.size() > 0 && decrypted_payload[0] == 0x08) {
-		// Field 1 tag (0x08 = field 1, wire type 0)
-		offset = 1;
-		if (offset < decrypted_payload.size()) {
-			// Decode port as varint
-			result.port = decodeVarint(decrypted_payload, offset);
-		} else {
-			result.port = 0;
-		}
-	} else {
-		// Payload doesn't start with 0x08, scan for it
-		result.port = 0;
-		for (size_t i = 0; i < decrypted_payload.size() - 1; i++) {
-			if (decrypted_payload[i] == 0x08) {
-				// Found field 1 tag, decode varint
-				offset = i + 1;
-				if (offset < decrypted_payload.size()) {
-					result.port = decodeVarint(decrypted_payload, offset);
-					break;
+	result.port = 0;
+	
+	// Scan the entire payload for the port field (0x08 tag)
+	// Don't limit to first 16 bytes - valid packets may have other fields first
+	for (size_t i = 0; i < decrypted_payload.size() - 1; i++) {
+		if (decrypted_payload[i] == 0x08) {
+			// Found field 1 tag (0x08 = field 1, wire type 0)
+			offset = i + 1;
+			if (offset < decrypted_payload.size()) {
+				// Decode port as varint
+				size_t varint_offset = offset;
+				uint64_t port_value = decodeVarint(decrypted_payload, varint_offset);
+				if (port_value > 0 && port_value < 256) {  // Valid port range
+					result.port = (uint8_t)port_value;
+					break;  // Found valid port, stop scanning
+				} else {
+					// Invalid port value, continue scanning
+					result.port = 0;
 				}
 			}
 		}
-		// If port field not found, this is invalid - don't guess from random bytes
-		if (result.port == 0) {
-			result.error_message = "Port field (0x08 tag) not found in decrypted payload";
-			return result;
+	}
+	
+	// DEBUG: If port not found, collect detailed analysis
+	if (result.port == 0 && decrypted_payload.size() > 0) {
+		std::stringstream debug_ss;
+		debug_ss << "Port field not found. Decrypted payload (" 
+		         << decrypted_payload.size() << " bytes, first 64): ";
+		for (size_t i = 0; i < decrypted_payload.size() && i < 64; i++) {
+			debug_ss << std::hex << std::setfill('0') << std::setw(2) 
+			         << (int)decrypted_payload[i] << " ";
 		}
+		debug_ss << std::dec << "\nProtobuf field analysis:\n";
+		
+		// Analyze protobuf structure
+		size_t debug_offset = 0;
+		int field_count = 0;
+		while (debug_offset < decrypted_payload.size() && field_count < 20) {
+			if (debug_offset >= decrypted_payload.size()) break;
+			
+			size_t saved_offset = debug_offset;
+			uint8_t first_byte = decrypted_payload[debug_offset];
+			uint64_t tag_wire_type = decodeVarint(decrypted_payload, debug_offset);
+			if (tag_wire_type == 0) break;
+			
+			uint8_t field_number = tag_wire_type >> 3;
+			uint8_t wire_type = tag_wire_type & 0x07;
+			
+			// Validate field number is reasonable (protobuf field numbers are typically 1-19000 for valid messages)
+			// Very high field numbers (>100) in the first few fields suggest invalid decryption
+			bool suspicious_field = (field_count < 3 && field_number > 100);
+			
+			debug_ss << "  Field " << (int)field_number 
+			         << ", wire_type " << (int)wire_type 
+			         << " (offset " << saved_offset << ", byte=0x" 
+			         << std::hex << std::setfill('0') << std::setw(2) << (int)first_byte << std::dec << ")";
+			if (suspicious_field) {
+				debug_ss << " <-- SUSPICIOUS: Very high field number suggests invalid decryption!";
+			}
+			
+			if (field_number == 1 && wire_type == 0) {
+				debug_ss << " <-- PORT FIELD!";
+				// Decode the port value
+				size_t port_offset = debug_offset;
+				uint64_t port_value = decodeVarint(decrypted_payload, port_offset);
+				debug_ss << " (port=" << port_value << ")";
+			}
+			debug_ss << "\n";
+			
+			// Skip field value
+			if (wire_type == 0) {  // Varint
+				uint64_t varint_val = decodeVarint(decrypted_payload, debug_offset);
+				debug_ss << "    Value (varint): " << varint_val << "\n";
+			} else if (wire_type == 1) {  // Fixed64
+				debug_offset += 8;
+				debug_ss << "    Value (fixed64): 8 bytes\n";
+			} else if (wire_type == 2 || wire_type == 3) {  // Length-delimited
+				uint64_t length = decodeVarint(decrypted_payload, debug_offset);
+				debug_ss << "    Value (length-delimited): length=" << length << "\n";
+				if (debug_offset + length <= decrypted_payload.size()) {
+					debug_ss << "    Data: ";
+					for (size_t i = 0; i < length && i < 16; i++) {
+						debug_ss << std::hex << std::setfill('0') << std::setw(2) 
+						         << (int)decrypted_payload[debug_offset + i] << " ";
+					}
+					debug_ss << std::dec << "\n";
+				}
+				debug_offset += length;
+			} else if (wire_type == 5) {  // Fixed32
+				debug_offset += 4;
+				debug_ss << "    Value (fixed32): 4 bytes\n";
+			} else {
+				// Invalid wire type - skip one byte and continue
+				debug_offset = saved_offset + 1;
+				debug_ss << "    Invalid wire type, skipping\n";
+			}
+			
+			field_count++;
+		}
+		
+		result.debug_info = debug_ss.str();
+	}
+	
+	// SPECIAL CASE: If packet starts with field 2 (0x12) and we haven't found port yet,
+	// the port might be missing or the packet might use a different format.
+	// Some Meshtastic packets might not include the port field explicitly if it's implied.
+	// Try to infer port from the payload content or use a default.
+	if (result.port == 0 && decrypted_payload.size() > 0 && decrypted_payload[0] == 0x12) {
+		// Packet starts with field 2 (payload) - port might be missing
+		// Try to parse the payload field and see if we can infer the port from content
+		size_t payload_start = 1; // Skip 0x12 tag
+		if (payload_start < decrypted_payload.size()) {
+			size_t length_offset = payload_start;
+			uint64_t payload_length = decodeVarint(decrypted_payload, payload_start);
+			
+			// Validate payload length
+			size_t remaining = decrypted_payload.size() - payload_start;
+			if (payload_length > remaining) {
+				// Invalid length - use remaining bytes
+				payload_length = remaining;
+				payload_start = length_offset + 1; // Skip tag, use remaining as payload
+			}
+			
+			if (payload_start + payload_length <= decrypted_payload.size() && payload_length > 0) {
+				std::vector<uint8_t> inner_payload(
+					decrypted_payload.begin() + payload_start,
+					decrypted_payload.begin() + payload_start + payload_length
+				);
+				
+				// Try to find port in the inner payload (some packet formats nest the port)
+				for (size_t i = 0; i < inner_payload.size() - 1; i++) {
+					if (inner_payload[i] == 0x08) {
+						size_t port_offset = i + 1;
+						uint64_t port_value = decodeVarint(inner_payload, port_offset);
+						if (port_value > 0 && port_value < 256) {
+							result.port = (uint8_t)port_value;
+							break;
+						}
+					}
+				}
+				
+				// If still no port, try to continue parsing after the payload field
+				// to see if port comes after
+				size_t after_payload = payload_start + payload_length;
+				if (result.port == 0 && after_payload < decrypted_payload.size()) {
+					for (size_t i = after_payload; i < decrypted_payload.size() - 1; i++) {
+						if (decrypted_payload[i] == 0x08) {
+							size_t port_offset = i + 1;
+							uint64_t port_value = decodeVarint(decrypted_payload, port_offset);
+							if (port_value > 0 && port_value < 256) {
+								result.port = (uint8_t)port_value;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// If port field not found, try parsing as full protobuf Data message
+	// Some packets might have the Data message structure with other fields first
+	// Protobuf fields can appear in any order, so we need to scan through all fields
+	if (result.port == 0) {
+		// Try to parse the entire payload as a Data message
+		// This will find the port field even if it's not at the start
+		size_t data_offset = 0;
+		std::vector<uint8_t> payload_data;  // Store field 2 (payload) if we find it
+		
+		while (data_offset < decrypted_payload.size()) {
+			size_t saved_offset = data_offset;
+			if (data_offset >= decrypted_payload.size())
+				break;
+				
+			uint64_t tag_wire_type = decodeVarint(decrypted_payload, data_offset);
+			if (tag_wire_type == 0 || data_offset >= decrypted_payload.size())
+				break;
+			
+			uint8_t field_number = tag_wire_type >> 3;
+			uint8_t wire_type = tag_wire_type & 0x07;
+			
+			if (field_number == 1 && wire_type == 0) {
+				// Found field 1: portnum
+				uint64_t port_value = decodeVarint(decrypted_payload, data_offset);
+				if (port_value > 0 && port_value < 256) {
+					result.port = (uint8_t)port_value;
+					// Don't break - continue to find payload field
+				}
+			} else if (field_number == 2 && (wire_type == 2 || wire_type == 3)) {
+				// Found field 2: payload (length-delimited)
+				// Handle both wire type 2 (normal) and 3 (deprecated groups, but seen in practice)
+				// For wire type 3, treat it the same as wire type 2 (length-delimited)
+				size_t length_offset = data_offset;
+				uint64_t length = decodeVarint(decrypted_payload, data_offset);
+				
+				// Validate length is reasonable (not larger than remaining payload)
+				// Some malformed packets may have invalid varint lengths
+				size_t remaining = decrypted_payload.size() - data_offset;
+				if (length > remaining) {
+					// Length is too large - likely invalid varint decoding or malformed packet
+					// Try to recover by using remaining bytes as the payload
+					// This handles cases where the varint length is corrupted
+					length = remaining;
+					// Reset offset to where length decoding started, then skip just the tag byte
+					data_offset = length_offset + 1; // Skip the 0x12 tag byte
+				}
+				
+				if (data_offset + length <= decrypted_payload.size() && length > 0 && length < 10000) {
+					payload_data = std::vector<uint8_t>(
+						decrypted_payload.begin() + data_offset,
+						decrypted_payload.begin() + data_offset + length
+					);
+					data_offset += length;
+					
+					// The payload field contains the actual app data (Text, Position, etc.)
+					// But the port should be in the Data message, not in the payload
+					// However, if we haven't found port yet, maybe this packet format is different
+					// Check if the payload itself contains the port field
+					if (result.port == 0 && payload_data.size() > 0) {
+						// Scan the payload for port field
+						for (size_t p = 0; p < payload_data.size() - 1; p++) {
+							if (payload_data[p] == 0x08) {
+								size_t port_offset = p + 1;
+								uint64_t port_value = decodeVarint(payload_data, port_offset);
+								if (port_value > 0 && port_value < 256) {
+									result.port = (uint8_t)port_value;
+									break;
+								}
+							}
+						}
+					}
+				} else {
+					// Invalid length, try to recover by treating as single-byte length
+					if (data_offset < decrypted_payload.size() && decrypted_payload[data_offset] < 128) {
+						length = decrypted_payload[data_offset];
+						data_offset++;
+						if (data_offset + length <= decrypted_payload.size() && length > 0) {
+							payload_data = std::vector<uint8_t>(
+								decrypted_payload.begin() + data_offset,
+								decrypted_payload.begin() + data_offset + length
+							);
+							data_offset += length;
+							// Check for port in payload
+							if (result.port == 0 && payload_data.size() > 0) {
+								for (size_t p = 0; p < payload_data.size() - 1; p++) {
+									if (payload_data[p] == 0x08) {
+										size_t port_offset = p + 1;
+										uint64_t port_value = decodeVarint(payload_data, port_offset);
+										if (port_value > 0 && port_value < 256) {
+											result.port = (uint8_t)port_value;
+											break;
+										}
+									}
+								}
+							}
+						} else {
+							data_offset = saved_offset + 1;
+						}
+					} else {
+						// Invalid length, skip
+						data_offset = saved_offset + 1;
+					}
+				}
+			} else {
+				// Skip other fields
+				if (wire_type == 0) {  // Varint
+					decodeVarint(decrypted_payload, data_offset);
+				} else if (wire_type == 1) {  // Fixed64
+					if (data_offset + 8 <= decrypted_payload.size()) {
+						data_offset += 8;
+					} else {
+						break;
+					}
+				} else if (wire_type == 2 || wire_type == 3) {  // Length-delimited or deprecated groups
+					uint64_t length = decodeVarint(decrypted_payload, data_offset);
+					if (data_offset + length <= decrypted_payload.size() && length < 10000) {
+						data_offset += length;
+					} else {
+						break;
+					}
+				} else if (wire_type == 5) {  // Fixed32
+					if (data_offset + 4 <= decrypted_payload.size()) {
+						data_offset += 4;
+					} else {
+						break;
+					}
+				} else {
+					// Unknown wire type, skip one byte and continue
+					data_offset = saved_offset + 1;
+				}
+			}
+		}
+	}
+	
+	// If still no port found, this is likely invalid or encrypted incorrectly
+	// However, if we tried as unencrypted (starting with 0x12) and failed,
+	// try decrypting it as encrypted data - it might be encrypted after all
+	if (result.port == 0 && is_unencrypted && encrypted_payload.size() > 0 && encrypted_payload[0] == 0x12) {
+		// Packet started with 0x12 but we couldn't find port - might actually be encrypted
+		// Try decrypting it
+		std::vector<uint8_t> encrypted_try = encrypted_payload;
+		std::vector<uint8_t> decrypted_try;
+		if (decryptPayload(encrypted_try, result, decrypted_try)) {
+			// Decryption succeeded - try parsing again
+			decrypted_payload = decrypted_try;
+			result.decrypted_payload_hex = bytesToHexString(decrypted_payload);
+			
+			// Try to find port in decrypted payload
+			for (size_t i = 0; i < decrypted_payload.size() - 1; i++) {
+				if (decrypted_payload[i] == 0x08) {
+					size_t offset = i + 1;
+					size_t varint_offset = offset;
+					uint64_t port_value = decodeVarint(decrypted_payload, varint_offset);
+					if (port_value > 0 && port_value < 256) {
+						result.port = (uint8_t)port_value;
+						break;
+					}
+				}
+			}
+			
+			// If still no port, continue with the fallback error handling below
+		}
+	}
+	
+	if (result.port == 0) {
+		// Provide more detailed error message
+		std::string hex_preview = bytesToHexString(std::vector<uint8_t>(
+			decrypted_payload.begin(), 
+			decrypted_payload.begin() + (decrypted_payload.size() > 32 ? 32 : decrypted_payload.size())
+		));
+		
+		// Check if we have suspicious field numbers (suggests wrong decryption key)
+		bool has_suspicious_fields = false;
+		size_t check_offset = 0;
+		int suspicious_count = 0;
+		for (int i = 0; i < 5 && check_offset < decrypted_payload.size(); i++) {
+			uint64_t tag = decodeVarint(decrypted_payload, check_offset);
+			if (tag == 0) break;
+			uint8_t field_num = tag >> 3;
+			if (field_num > 100) {
+				suspicious_count++;
+			}
+		}
+		has_suspicious_fields = (suspicious_count >= 2);
+		
+		result.error_message = "Port field (0x08 tag) not found in decrypted payload - may be invalid encryption or corrupted packet. First bytes: " + hex_preview;
+		if (has_suspicious_fields) {
+			result.error_message += " (WARNING: Suspiciously high field numbers detected - likely wrong decryption key/channel!)";
+		} else if (has_protobuf_tag) {
+			result.error_message += " (contains valid protobuf tags but no port field)";
+		} else {
+			result.error_message += " (does not appear to be valid protobuf)";
+		}
+		return result;
 	}
 	switch (result.port)
 	{
@@ -384,32 +735,79 @@ bool MeshtasticDecoder::decodeProtobuf(
   const std::vector<uint8_t>& data,
   DecodedPacket& packet)
 {
-	if (data.size() < 4)
+	if (data.empty())
 	{
 		return false;
 	}
 
-	// The structure is: 08 [port] 12 [length] [data]
-	// 0x12 = field 2, wire type 2 (length-delimited)
+	// Decode Data message fields (request_id, reply_id, want_response, etc.)
+	// These fields are in the full Data message, not just the payload
+	decodeDataMessageFields(data, packet);
 
-	if (data[2] == 0x12)
+	// Parse the Data message to find the payload field (field 2)
+	// We can't assume it's at a fixed offset because other fields might come before it
+	std::vector<uint8_t> protobuf_data;
+	size_t offset = 0;
+	
+	while (offset < data.size())
 	{
-		uint8_t length = data[3];
-
-		if (data.size() < 4 + static_cast<size_t>(length))
+		// Read field tag and wire type
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		if (field_number == 1 && wire_type == 0)  // Field 1: portnum (varint)
 		{
-			return false;
+			// Already decoded, skip
+			decodeVarint(data, offset);
 		}
+		else if (field_number == 2 && wire_type == 2)  // Field 2: payload (length-delimited)
+		{
+			// Found the payload field!
+			uint64_t length = decodeVarint(data, offset);
+			
+			if (offset + length <= data.size())
+			{
+				// Extract protobuf data
+				protobuf_data = std::vector<uint8_t>(data.begin() + offset,
+													  data.begin() + offset + length);
+				offset += length;
+				break;  // Found payload, stop parsing
+			}
+		}
+		else
+		{
+			// Skip other fields
+			if (wire_type == 0)  // Varint
+			{
+				decodeVarint(data, offset);
+			}
+			else if (wire_type == 1)  // Fixed64
+			{
+				offset += 8;
+			}
+			else if (wire_type == 2)  // Length-delimited
+			{
+				uint64_t length = decodeVarint(data, offset);
+				offset += length;
+			}
+			else if (wire_type == 5)  // Fixed32
+			{
+				offset += 4;
+			}
+		}
+	}
 
-		// Extract protobuf data
-		std::vector<uint8_t> protobuf_data(data.begin() + 4,
-										   data.begin() + 4 + length);
-
-		// Decode based on app type
+	// Decode based on app type
+	if (!protobuf_data.empty())
+	{
 		switch (packet.port)
 		{
 			case 1: // TEXT_MESSAGE_APP
-				return decodeTextMessage(data, packet);
+				return decodeTextMessage(protobuf_data, packet);
 			case 3: // POSITION_APP
 				return decodePosition(protobuf_data, packet);
 			case 4: // NODEINFO_APP
@@ -501,6 +899,120 @@ void MeshtasticDecoder::decodeMeshPacketFields(
 			default:
 				// Skip other fields - we only care about routing fields here
 				// The actual Data message decoding happens in decodeProtobuf
+				if (wire_type == 0)
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 2)
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				else if (wire_type == 5)
+				{
+					offset += 4; // Skip fixed32
+				}
+				else
+				{
+					offset++;
+				}
+				break;
+		}
+	}
+}
+
+void MeshtasticDecoder::decodeDataMessageFields(
+  const std::vector<uint8_t>& data,
+  DecodedPacket& packet)
+{
+	// Decode Data message protobuf fields from the decrypted payload
+	// Data message structure (from mesh.proto):
+	// - field 1: portnum (uint32 varint) - already decoded
+	// - field 2: payload (bytes) - already decoded
+	// - field 7: request_id (fixed32) - packet_id of message being replied to
+	// - field 8: reply_id (fixed32) - reply_id field
+	// - field 9: want_response (bool varint) - want_response flag
+	// - field 10: dest (uint32 varint) - destination address
+	// - field 11: source (uint32 varint) - source address
+	// - field 12: emoji (uint32 varint) - emoji field
+	// - field 13: want_ack (bool varint) - want_ack flag
+	
+	if (data.empty())
+	{
+		return;
+	}
+	
+	size_t offset = 0;
+	
+	// Parse Data message fields
+	while (offset < data.size())
+	{
+		if (offset >= data.size())
+			break;
+		
+		// Read field tag and wire type
+		uint64_t tag_wire_type = decodeVarint(data, offset);
+		if (tag_wire_type == 0)
+			break;
+		
+		uint8_t field_number = tag_wire_type >> 3;
+		uint8_t wire_type = tag_wire_type & 0x07;
+		
+		switch (field_number)
+		{
+			case 1: // portnum (uint32 varint) - already decoded, skip
+				if (wire_type == 0) // Varint
+				{
+					decodeVarint(data, offset);
+				}
+				break;
+			
+			case 2: // payload (bytes) - already decoded, skip
+				if (wire_type == 2) // Length-delimited
+				{
+					uint64_t field_length = decodeVarint(data, offset);
+					offset += field_length;
+				}
+				break;
+			
+			case 7: // request_id (fixed32) - packet_id of message being replied to
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						packet.request_id = data[offset] |
+											(data[offset + 1] << 8) |
+											(data[offset + 2] << 16) |
+											(data[offset + 3] << 24);
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 8: // reply_id (fixed32)
+				if (wire_type == 5) // Fixed32
+				{
+					if (offset + 4 <= data.size())
+					{
+						packet.reply_id = data[offset] |
+										  (data[offset + 1] << 8) |
+										  (data[offset + 2] << 16) |
+										  (data[offset + 3] << 24);
+						offset += 4;
+					}
+				}
+				break;
+			
+			case 9: // want_response (bool varint)
+				if (wire_type == 0) // Varint
+				{
+					uint64_t want_response_val = decodeVarint(data, offset);
+					packet.want_response = (want_response_val != 0);
+				}
+				break;
+			
+			default:
+				// Skip other fields - we only care about reply-related fields here
 				if (wire_type == 0)
 				{
 					decodeVarint(data, offset);
@@ -820,23 +1332,76 @@ bool MeshtasticDecoder::decodeTextMessage(
   const std::vector<uint8_t>& data,
   DecodedPacket& packet)
 {
-	// Structure: 08 01 12 [length] [text_data]
-	// The text message is directly in the protobuf data, not nested
-
-	if (data.size() >= 4 && data[0] == 0x08 && data[1] == 0x01 &&
-		data[2] == 0x12)
+	// Text message can be in two formats:
+	// 1. Protobuf Text message: 0x0A [length] [text_bytes] (field 1: text)
+	// 2. Raw text bytes: just the UTF-8 text directly
+	
+	if (data.empty())
 	{
-		uint8_t length = data[3];
-
-		if (data.size() >= 4 + static_cast<size_t>(length) && length > 0)
+		return true;  // Empty payload is valid (no text)
+	}
+	
+	// Check if payload starts with protobuf field tag 0x0A (field 1, wire type 2)
+	if (data.size() > 0 && data[0] == 0x0A)
+	{
+		// Format 1: Protobuf Text message structure
+		size_t offset = 0;
+		
+		// Parse Text message fields
+		while (offset < data.size())
 		{
-			// Extract text directly from bytes 4 to 4+length
-			std::string text(data.begin() + 4, data.begin() + 4 + length);
-
-			// The text is already in UTF-8 format, so we can use it directly
-			// Just ensure it's null-terminated
-			packet.text_message = text;
+			if (offset >= data.size())
+				break;
+			
+			// Read field tag and wire type
+			uint64_t tag_wire_type = decodeVarint(data, offset);
+			if (tag_wire_type == 0)
+				break;
+			
+			uint8_t field_number = tag_wire_type >> 3;
+			uint8_t wire_type = tag_wire_type & 0x07;
+			
+			if (field_number == 1 && wire_type == 2)  // Field 1: text (string)
+			{
+				// Read length
+				uint64_t length = decodeVarint(data, offset);
+				
+				if (offset + length <= data.size() && length > 0)
+				{
+					// Extract text
+					std::string text(data.begin() + offset, data.begin() + offset + length);
+					packet.text_message = text;
+					offset += length;
+				}
+			}
+			else
+			{
+				// Skip unknown fields
+				if (wire_type == 0)  // Varint
+				{
+					decodeVarint(data, offset);
+				}
+				else if (wire_type == 1)  // Fixed64
+				{
+					offset += 8;
+				}
+				else if (wire_type == 2)  // Length-delimited
+				{
+					uint64_t length = decodeVarint(data, offset);
+					offset += length;
+				}
+				else if (wire_type == 5)  // Fixed32
+				{
+					offset += 4;
+				}
+			}
 		}
+	}
+	else
+	{
+		// Format 2: Raw text bytes - the payload IS the text directly
+		std::string text(data.begin(), data.end());
+		packet.text_message = text;
 	}
 
 	return true;
@@ -2410,7 +2975,11 @@ std::string MeshtasticDecoder::toJson(const DecodedPacket& packet)
 	if (!packet.success)
 	{
 		json << "  \"error\": \"" << escapeJsonString(packet.error_message)
-			 << "\"\n";
+			 << "\"";
+		if (!packet.debug_info.empty()) {
+			json << ",\n  \"debug_info\": \"" << escapeJsonString(packet.debug_info) << "\"";
+		}
+		json << "\n";
 	}
 	else
 	{
@@ -2438,6 +3007,40 @@ std::string MeshtasticDecoder::toJson(const DecodedPacket& packet)
 		json << "  \"port\": " << (int)packet.port << ",\n";
 		json << "  \"app_name\": \"" << escapeJsonString(packet.app_name)
 			 << "\",\n";
+		
+		// Data message fields (common to all app types)
+		if (packet.request_id != 0 || packet.reply_id != 0 || packet.want_response)
+		{
+			json << "  \"data_message\": {\n";
+			bool first_field = true;
+			
+			if (packet.request_id != 0)
+			{
+				if (!first_field) json << ",\n";
+				json << "    \"request_id\": \"0x" << std::uppercase << std::hex << std::setfill('0')
+					 << std::setw(8) << packet.request_id << " (" << std::dec << packet.request_id << ")\",\n";
+				json << "    \"is_reply\": true";
+				first_field = false;
+			}
+			
+			if (packet.reply_id != 0)
+			{
+				if (!first_field) json << ",\n";
+				json << "    \"reply_id\": \"0x" << std::uppercase << std::hex << std::setfill('0')
+					 << std::setw(8) << packet.reply_id << " (" << std::dec << packet.reply_id << ")\"";
+				first_field = false;
+			}
+			
+			if (packet.want_response)
+			{
+				if (!first_field) json << ",\n";
+				json << "    \"want_response\": true";
+				first_field = false;
+			}
+			
+			json << "\n  },\n";
+		}
+		
 		json << "  \"nonce_hex\": \"" << packet.nonce_hex << "\",\n";
 		json << "  \"key_used\": \"" << packet.key_used << "\",\n";
 		

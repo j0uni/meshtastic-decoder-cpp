@@ -6,12 +6,45 @@
 #ifdef ARDUINO
 #include <esp_random.h>
 #include <Arduino.h>  // For millis() and analogRead()
+#else
+#include <chrono>
+#include <random>
+// Provide millis() equivalent for non-Arduino platforms
+static uint32_t millis() {
+	return (uint32_t)(std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 #endif
 
 const std::vector<uint8_t> MeshtasticEncoder::DEFAULT_PSK = {
 	0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
 	0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01
 };
+
+// Channel hash calculation
+
+uint8_t MeshtasticEncoder::xorHash(const uint8_t* data, size_t len)
+{
+	uint8_t h = 0;
+	for (size_t i = 0; i < len; i++)
+	{
+		h ^= data[i];
+	}
+	return h;
+}
+
+uint8_t MeshtasticEncoder::calculateChannelHash(const std::string& channel_name,
+												const std::vector<uint8_t>& psk)
+{
+	// Use provided PSK or default
+	const std::vector<uint8_t>& key = psk.empty() ? DEFAULT_PSK : psk;
+	
+	// Calculate hash: xorHash(channel_name) XOR xorHash(PSK)
+	uint8_t channel_hash = xorHash((const uint8_t*)channel_name.c_str(), channel_name.length());
+	uint8_t psk_hash = xorHash(key.data(), key.size());
+	
+	return channel_hash ^ psk_hash;
+}
 
 // Protobuf encoding utilities
 
@@ -239,6 +272,7 @@ bool MeshtasticEncoder::encryptPayload(const std::vector<uint8_t>& plaintext,
 MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeTextMessage(
 	const TextMessage& msg,
 	uint32_t from_address,
+	const std::string& channel_name,
 	const std::vector<uint8_t>& psk)
 {
 	EncodedPacket result;
@@ -265,6 +299,24 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeTextMessage(
 	std::vector<uint8_t> text_bytes(msg.text.begin(), msg.text.end());
 	encodeLengthDelimited(payload, 2, text_bytes);
 	
+	// Field 7: request_id (fixed32) - packet_id of message being replied to
+	if (msg.request_id != 0)
+	{
+		encodeFixed32Field(payload, 7, msg.request_id);
+	}
+	
+	// Field 8: reply_id (fixed32)
+	if (msg.reply_id != 0)
+	{
+		encodeFixed32Field(payload, 8, msg.reply_id);
+	}
+	
+	// Field 9: want_response (bool varint)
+	if (msg.want_response)
+	{
+		encodeVarintField(payload, 9, 1);
+	}
+	
 	// Encrypt payload
 	std::vector<uint8_t> encrypted_payload;
 	if (!encryptPayload(payload, encrypted_payload, packet_id, from_address, psk))
@@ -281,11 +333,26 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeTextMessage(
 	uint8_t flags = (msg.hop_limit & 0x07) | ((msg.hop_limit & 0x07) << 5);
 	uint8_t next_hop = 0;
 	uint8_t relay_node = 0;
+	
+	// Channel: Calculate hash from channel_name if provided, otherwise use msg.channel as hash
+	// NOTE: Channel 0 is special - it indicates PKI/private encryption (Meshtastic protocol)
+	// For private messages: channel=0 (PKI), encryption uses private PSK
+	// For public messages: channel=hash (e.g. 0x55 for "EdgeFastLow"), encryption uses public PSK
+	uint8_t channel;
+	if (!channel_name.empty()) {
+		// If channel_name is provided, calculate hash using the PSK (for public messages)
+		channel = calculateChannelHash(channel_name, psk);
+	} else {
+		// Use msg.channel directly
+		// Channel 0 means PKI/private encryption - keep it as 0, don't convert!
+		channel = msg.channel;
+	}
+	
 	std::vector<uint8_t> header = buildHeader(msg.to_address,
 											  from_address,
 											  packet_id,
 											  flags,
-											  msg.channel,
+											  channel,
 											  next_hop,
 											  relay_node);
 	
@@ -304,6 +371,7 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeTextMessage(
 MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeNodeInfo(
 	const NodeInfo& nodeinfo,
 	uint32_t from_address,
+	const std::string& channel_name,
 	const std::vector<uint8_t>& psk)
 {
 	EncodedPacket result;
@@ -388,11 +456,15 @@ MeshtasticEncoder::EncodedPacket MeshtasticEncoder::encodeNodeInfo(
 	uint8_t flags = (nodeinfo.hop_limit & 0x07) | ((nodeinfo.hop_limit & 0x07) << 5);
 	uint8_t next_hop = 0;
 	uint8_t relay_node = 0;
+	
+	// Calculate channel hash from channel_name (like sivu does)
+	uint8_t channel = channel_name.empty() ? calculateChannelHash("EdgeFastLow", psk) : calculateChannelHash(channel_name, psk);
+	
 	std::vector<uint8_t> header = buildHeader(0xFFFFFFFF,  // Broadcast
 											  from_address,
 											  packet_id,
 											  flags,
-											  0,  // Default channel
+											  channel,
 											  next_hop,
 											  relay_node);
 	
